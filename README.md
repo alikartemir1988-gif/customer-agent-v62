@@ -1,16 +1,114 @@
-# Customer Agent V6.2 — Deploy
+# Customer Agent 7.0
 
-Files:
-- app.py
-- requirements.txt
+Arabic-first Telegram sales and order automation for merchants.
 
-Required environment variable:
-- TELEGRAM_BOT_TOKEN = your NEW Telegram token (never put it in app.py)
+## What it does
 
-Start command:
+- Answers common product, pricing and delivery questions in Arabic.
+- Detects purchase intent and guides customers through an order flow.
+- Captures customer name, phone, city, product and quantity.
+- Stores orders and conversation state persistently in SQLite.
+- Prevents duplicate order creation within an active completed session.
+- Provides a protected admin API for order management and sales statistics.
+- Supports configurable products and delivery rules through environment variables.
+- Supports Telegram webhook secret verification.
+- Includes health endpoints suitable for cloud hosting.
+
+## Commercial positioning
+
+This repository is the deployable backend for a customizable customer-sales agent. A commercial delivery can include deployment, merchant-specific catalog configuration, branding, onboarding and support. Production customers with high traffic should use a managed persistent database and production observability rather than relying on a local SQLite file.
+
+## Required environment variables
+
+- `TELEGRAM_BOT_TOKEN` — Telegram bot token. Never commit it.
+- `WEBHOOK_URL` — public HTTPS base URL of the deployed service.
+- `ADMIN_API_KEY` — long random secret protecting admin endpoints.
+- `WEBHOOK_SECRET` — long random secret used to verify Telegram webhook requests.
+
+## Optional environment variables
+
+- `DB_PATH` — SQLite path. Default: `customer_agent.db`.
+- `PORT` — local server port. Default: `10000`.
+- `PRODUCTS_JSON` — JSON object replacing the default product catalog.
+- `DELIVERY_JSON` — JSON object replacing the default delivery rules.
+
+Example `PRODUCTS_JSON`:
+
+```json
+{
+  "منتج 1": {
+    "price": 25,
+    "currency": "$",
+    "available": true,
+    "aliases": ["منتج 1", "المنتج الاول"]
+  }
+}
+```
+
+## Start
+
+Development:
+
+```bash
 python app.py
+```
 
-Important:
-This package uses SQLite for orders and in-memory conversation sessions.
-For a first demo it is fine. For a production customer, use persistent storage
-and preferably PostgreSQL/Redis before promising durable 24/7 operation.
+Production:
+
+```bash
+gunicorn --bind 0.0.0.0:$PORT app:app
+```
+
+## Deployment sequence
+
+1. Create the Telegram bot and obtain its token.
+2. Deploy this repository to a Python hosting service.
+3. Configure all required environment variables.
+4. Use persistent disk storage for `DB_PATH` if SQLite is used.
+5. Start the application with Gunicorn.
+6. POST `/admin/setup-webhook` with header `X-Admin-Key: <ADMIN_API_KEY>`.
+7. Check `/health` and `/webhook-info`.
+8. Send `/start` to the Telegram bot and test a complete order.
+
+## Admin API
+
+All `/admin/*` routes require:
+
+```text
+X-Admin-Key: <ADMIN_API_KEY>
+```
+
+Endpoints:
+
+- `GET /admin/orders?limit=50`
+- `GET /admin/orders?status=new&limit=50`
+- `GET /admin/stats`
+- `PATCH /admin/orders/<id>/status`
+- `POST /admin/setup-webhook`
+
+Allowed order statuses:
+
+- `new`
+- `confirmed`
+- `processing`
+- `shipped`
+- `delivered`
+- `cancelled`
+
+## Health endpoints
+
+- `GET /`
+- `GET /health`
+- `GET /webhook-info`
+
+## Security
+
+- Never commit Telegram tokens, admin keys, wallet addresses intended to stay private, passwords or exchange credentials.
+- Use long random values for `ADMIN_API_KEY` and `WEBHOOK_SECRET`.
+- Rotate secrets after sharing them in insecure channels.
+- Keep customer phone/order data private and restrict admin API access.
+- For larger deployments, add HTTPS termination, managed PostgreSQL, rate limiting, backups, centralized logs and monitoring.
+
+## Product limitations
+
+This is a deterministic conversational commerce engine rather than a general-purpose LLM. That makes order flows predictable and inexpensive, but merchant-specific customization and testing are required before production use. SQLite is appropriate for demos and small single-instance deployments; multi-instance/high-volume installations should migrate to PostgreSQL.
