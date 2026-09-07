@@ -4,6 +4,7 @@ import requests
 from flask import Flask,request,jsonify
 
 BOT_TOKEN=os.environ.get('TELEGRAM_BOT_TOKEN','').strip()
+WEBHOOK_URL=os.environ.get('WEBHOOK_URL','').strip()
 DB_PATH=os.environ.get('DB_PATH','customer_agent.db')
 API=f'https://api.telegram.org/bot{BOT_TOKEN}'
 app=Flask(__name__)
