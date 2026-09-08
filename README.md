@@ -9,6 +9,7 @@ A Telegram sales assistant that answers product, pricing, and delivery questions
 - Shows a complete order review before saving.
 - Saves only after the customer writes `تأكيد`, `نعم`, or another supported confirmation.
 - Lets the customer change details before confirmation.
+- Restores an unfinished or completed conversation after an app restart.
 - Ignores Telegram updates that were already processed.
 - Supports an optional Telegram webhook secret.
 
@@ -47,9 +48,9 @@ Tests also run automatically on every push and pull request.
 
 ## Health checks
 
-- `GET /`: service health.
+- `GET /`: service health, app version, and deployed Render commit.
 - `GET /webhook-info`: Telegram webhook status.
 
 ## Storage note
 
-SQLite orders and in-memory conversation sessions are acceptable for a first demo. Before promising durable multi-instance 24/7 operation, migrate orders to PostgreSQL and sessions to Redis (or another persistent shared store).
+Orders, processed Telegram updates, and conversation sessions currently use SQLite. They survive an app-process restart when `DB_PATH` points to retained storage. Render's default filesystem is ephemeral, so before promising durable multi-instance 24/7 operation, attach persistent storage or migrate orders and sessions to managed PostgreSQL/Redis.

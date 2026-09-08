@@ -20,6 +20,7 @@ class OrderFlowTests(unittest.TestCase):
         with sqlite3.connect(customer_agent.DB_PATH) as conn:
             conn.execute("DELETE FROM orders")
             conn.execute("DELETE FROM processed_updates")
+            conn.execute("DELETE FROM sessions")
             conn.commit()
 
     def order_count(self):
@@ -146,6 +147,8 @@ class OrderFlowTests(unittest.TestCase):
                 message,
             )
 
+        customer_agent.SESSIONS.clear()
+
         repeated = customer_agent.handle_message(
             chat_id,
             "تأكيد",
@@ -179,6 +182,58 @@ class OrderFlowTests(unittest.TestCase):
         self.assertIn("لغيت", cancelled)
         self.assertEqual(self.order_count(), 0)
 
+    def test_order_progress_survives_memory_restart(self):
+        chat_id = 105
+
+        customer_agent.handle_message(
+            chat_id,
+            "بدي الجهاز",
+        )
+        customer_agent.handle_message(
+            chat_id,
+            "نور أحمد",
+        )
+
+        customer_agent.SESSIONS.clear()
+
+        phone_reply = customer_agent.handle_message(
+            chat_id,
+            "0999123456",
+        )
+
+        self.assertIn("المدينة", phone_reply)
+
+        customer_agent.SESSIONS.clear()
+
+        review = customer_agent.handle_message(
+            chat_id,
+            "دمشق",
+        )
+
+        self.assertIn("الاسم: نور أحمد", review)
+        self.assertIn("الهاتف: 0999123456", review)
+        self.assertIn("المدينة: دمشق", review)
+
+    def test_reset_deletes_saved_session(self):
+        chat_id = 106
+
+        customer_agent.handle_message(
+            chat_id,
+            "بدي الجهاز",
+        )
+        customer_agent.handle_message(
+            chat_id,
+            "كريم علي",
+        )
+
+        customer_agent.reset(chat_id)
+        customer_agent.SESSIONS.clear()
+
+        state = customer_agent.session(chat_id)
+
+        self.assertIsNone(state["name"])
+        self.assertFalse(state["buying"])
+
 
 class TelegramWebhookTests(unittest.TestCase):
 
@@ -187,6 +242,7 @@ class TelegramWebhookTests(unittest.TestCase):
 
         with sqlite3.connect(customer_agent.DB_PATH) as conn:
             conn.execute("DELETE FROM processed_updates")
+            conn.execute("DELETE FROM sessions")
             conn.commit()
 
     def test_duplicate_update_is_ignored(self):

@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import sqlite3
@@ -15,6 +16,8 @@ BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "").strip()
 WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "").strip()
 DB_PATH = os.environ.get("DB_PATH", "customer_agent.db").strip()
+APP_VERSION = "6.2.1"
+GIT_COMMIT = os.environ.get("RENDER_GIT_COMMIT", "").strip()
 
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
@@ -286,6 +289,16 @@ def init_db():
         """
     )
 
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sessions(
+            chat_id TEXT PRIMARY KEY,
+            state_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+
     conn.commit()
     conn.close()
 
@@ -356,23 +369,125 @@ def remember_update(update_id):
 # SESSION
 # =========================================================
 
+def default_session_state():
+
+    return {
+        "name": None,
+        "phone": None,
+        "city": None,
+        "product": None,
+        "qty": 1,
+        "buying": False,
+        "done": False,
+        "order_id": None,
+        "awaiting_confirmation": False,
+        "customer_message": None,
+    }
+
+
+def load_session(chat_id):
+
+    conn = sqlite3.connect(
+        DB_PATH,
+        timeout=20,
+    )
+
+    row = conn.execute(
+        """
+        SELECT state_json
+        FROM sessions
+        WHERE chat_id = ?
+        """,
+        (str(chat_id),),
+    ).fetchone()
+
+    conn.close()
+
+    if not row:
+        return None
+
+    try:
+        saved = json.loads(row[0])
+    except (TypeError, ValueError):
+        return None
+
+    if not isinstance(saved, dict):
+        return None
+
+    state = default_session_state()
+
+    for key in state:
+        if key in saved:
+            state[key] = saved[key]
+
+    return state
+
+
+def save_session(chat_id, state):
+
+    conn = sqlite3.connect(
+        DB_PATH,
+        timeout=20,
+    )
+
+    conn.execute(
+        """
+        INSERT INTO sessions(
+            chat_id,
+            state_json,
+            updated_at
+        )
+        VALUES(?,?,?)
+        ON CONFLICT(chat_id) DO UPDATE SET
+            state_json = excluded.state_json,
+            updated_at = excluded.updated_at
+        """,
+        (
+            str(chat_id),
+            json.dumps(
+                state,
+                ensure_ascii=False,
+            ),
+            datetime.now().isoformat(
+                timespec="seconds"
+            ),
+        ),
+    )
+
+    conn.commit()
+    conn.close()
+
+
+def delete_session(chat_id):
+
+    conn = sqlite3.connect(
+        DB_PATH,
+        timeout=20,
+    )
+
+    conn.execute(
+        """
+        DELETE FROM sessions
+        WHERE chat_id = ?
+        """,
+        (str(chat_id),),
+    )
+
+    conn.commit()
+    conn.close()
+
+
 def session(chat_id):
 
-    return SESSIONS.setdefault(
-        str(chat_id),
-        {
-            "name": None,
-            "phone": None,
-            "city": None,
-            "product": None,
-            "qty": 1,
-            "buying": False,
-            "done": False,
-            "order_id": None,
-            "awaiting_confirmation": False,
-            "customer_message": None,
-        },
-    )
+    key = str(chat_id)
+
+    if key not in SESSIONS:
+        SESSIONS[key] = (
+            load_session(key)
+            or default_session_state()
+        )
+
+    return SESSIONS[key]
 
 
 def reset(chat_id):
@@ -381,6 +496,8 @@ def reset(chat_id):
         str(chat_id),
         None,
     )
+
+    delete_session(chat_id)
 
 
 # =========================================================
@@ -918,7 +1035,7 @@ def maybe_capture_name(
 # MAIN AI / SALES LOGIC
 # =========================================================
 
-def handle_message(
+def _handle_message(
     chat_id,
     text,
 ):
@@ -1316,6 +1433,28 @@ def handle_message(
     )
 
 
+def handle_message(
+    chat_id,
+    text,
+):
+
+    try:
+        return _handle_message(
+            chat_id,
+            text,
+        )
+    finally:
+        state = SESSIONS.get(
+            str(chat_id)
+        )
+
+        if state is not None:
+            save_session(
+                chat_id,
+                state,
+            )
+
+
 def telegram_api(method, **data):
 
     if not BOT_TOKEN:
@@ -1403,6 +1542,10 @@ def health():
     return jsonify(
         {
             "status": "ok",
+            "service": "customer-agent-v62",
+            "version": APP_VERSION,
+            "commit": GIT_COMMIT[:7],
+            "session_store": "sqlite",
         }
     )
 
