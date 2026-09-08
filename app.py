@@ -1143,7 +1143,7 @@ def register_webhook():
             f"{API}/setWebhook",
             json={
                 "url": url,
-                "drop_pending_updates": True,
+                "drop_pending_updates": False,
             },
             timeout=20,
         )
@@ -1328,3 +1328,13 @@ def telegram_webhook():
 init_db()
 
 register_webhook()
+
+
+if __name__ == "__main__":
+
+    port = int(os.environ.get("PORT", "8000"))
+
+    app.run(
+        host="0.0.0.0",
+        port=port,
+    )
