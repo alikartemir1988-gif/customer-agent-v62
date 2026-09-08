@@ -1,6 +1,16 @@
-# Customer Agent V6.2 — Deploy
+# Customer Agent V6.2
 
-A Telegram sales assistant that answers product, pricing, and delivery questions and records customer orders.
+A Telegram sales assistant that answers product, pricing, and delivery questions and records confirmed customer orders.
+
+## Current behavior
+
+- Answers product, price, and delivery questions in Arabic.
+- Collects product, quantity, name, phone, and city.
+- Shows a complete order review before saving.
+- Saves only after the customer writes `تأكيد`, `نعم`, or another supported confirmation.
+- Lets the customer change details before confirmation.
+- Ignores Telegram updates that were already processed.
+- Supports an optional Telegram webhook secret.
 
 ## Required environment variables
 
@@ -9,6 +19,7 @@ A Telegram sales assistant that answers product, pricing, and delivery questions
 
 ## Optional environment variables
 
+- `TELEGRAM_WEBHOOK_SECRET`: Random secret used to verify that webhook requests came from Telegram.
 - `DB_PATH`: SQLite database path (default: `customer_agent.db`).
 - `PORT`: HTTP port when starting with Python (default: `8000`).
 
@@ -25,6 +36,14 @@ Local/demo:
 ```bash
 python app.py
 ```
+
+## Test
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+Tests also run automatically on every push and pull request.
 
 ## Health checks
 

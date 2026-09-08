@@ -13,6 +13,7 @@ from flask import Flask, jsonify, request
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "").strip()
+WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "").strip()
 DB_PATH = os.environ.get("DB_PATH", "customer_agent.db").strip()
 
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -276,6 +277,77 @@ def init_db():
         """
     )
 
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS processed_updates(
+            update_id INTEGER PRIMARY KEY,
+            processed_at TEXT NOT NULL
+        )
+        """
+    )
+
+    conn.commit()
+    conn.close()
+
+
+def update_was_processed(update_id):
+
+    if update_id is None:
+        return False
+
+    conn = sqlite3.connect(
+        DB_PATH,
+        timeout=20,
+    )
+
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM processed_updates
+        WHERE update_id = ?
+        """,
+        (update_id,),
+    ).fetchone()
+
+    conn.close()
+
+    return row is not None
+
+
+def remember_update(update_id):
+
+    if update_id is None:
+        return
+
+    conn = sqlite3.connect(
+        DB_PATH,
+        timeout=20,
+    )
+
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO processed_updates(
+            update_id,
+            processed_at
+        )
+        VALUES(?,?)
+        """,
+        (
+            update_id,
+            datetime.now().isoformat(
+                timespec="seconds"
+            ),
+        ),
+    )
+
+    conn.execute(
+        """
+        DELETE FROM processed_updates
+        WHERE update_id < ?
+        """,
+        (update_id - 10000,),
+    )
+
     conn.commit()
     conn.close()
 
@@ -297,6 +369,8 @@ def session(chat_id):
             "buying": False,
             "done": False,
             "order_id": None,
+            "awaiting_confirmation": False,
+            "customer_message": None,
         },
     )
 
@@ -663,6 +737,109 @@ def create_order(state, original_text):
 
 
 # =========================================================
+# ORDER REVIEW / CONFIRMATION
+# =========================================================
+
+CONFIRM_WORDS = {
+    "تاكيد",
+    "تاكيد الطلب",
+    "اكد",
+    "اكد الطلب",
+    "نعم",
+    "اي",
+    "ايوه",
+    "تمام",
+}
+
+EDIT_WORDS = {
+    "تعديل",
+    "عدل",
+    "بدي عدل",
+}
+
+
+def money_text(value):
+
+    if float(value).is_integer():
+        return str(int(value))
+
+    return f"{value:.2f}".rstrip("0").rstrip(".")
+
+
+def order_review_text(state):
+
+    data = PRODUCTS[
+        state["product"]
+    ]
+
+    total = (
+        data["price"]
+        * state["qty"]
+    )
+
+    return (
+        "🧾 راجع طلبك قبل التسجيل:\n\n"
+        f"الاسم: {state['name']}\n"
+        f"المنتج: {state['product']}\n"
+        f"الكمية: {state['qty']}\n"
+        f"الإجمالي: "
+        f"{money_text(total)}"
+        f"{data['currency']}\n"
+        f"الهاتف: {state['phone']}\n"
+        f"المدينة: {state['city']}\n\n"
+        "إذا المعلومات صحيحة اكتب: تأكيد\n"
+        "للتعديل اكتب المعلومة الجديدة مباشرة، "
+        "مثلاً: الكمية 3 أو المدينة حلب\n"
+        "وللإلغاء اكتب: إلغاء الطلب"
+    )
+
+
+def complete_order(state, confirmation_text):
+
+    if state["done"]:
+
+        return (
+            "طلبك مسجل مسبقاً ✅ "
+            f"رقم الطلب: "
+            f"{state['order_id']}"
+        )
+
+    order_id = create_order(
+        state,
+        state.get("customer_message")
+        or confirmation_text,
+    )
+
+    state["done"] = True
+    state["order_id"] = order_id
+    state["awaiting_confirmation"] = False
+    state["buying"] = False
+
+    data = PRODUCTS[
+        state["product"]
+    ]
+
+    total = (
+        data["price"]
+        * state["qty"]
+    )
+
+    return (
+        "✅ تم تسجيل طلبك بنجاح\n\n"
+        f"رقم الطلب: {order_id}\n"
+        f"الاسم: {state['name']}\n"
+        f"المنتج: {state['product']}\n"
+        f"الكمية: {state['qty']}\n"
+        f"الإجمالي: "
+        f"{money_text(total)}"
+        f"{data['currency']}\n"
+        f"المدينة: {state['city']}\n"
+        f"التوصيل: "
+        f"{DELIVERY.get(state['city'], '2-4 أيام')}"
+    )
+
+
+# =========================================================
 # CAPTURE NAME DURING ORDER
 # =========================================================
 
@@ -778,6 +955,23 @@ def handle_message(
 
     n = norm(text)
 
+    if (
+        state["buying"]
+        and not phone
+        and contains_any(
+            text,
+            [
+                "الكمية",
+                "الكميه",
+                "العدد",
+            ],
+        )
+    ):
+
+        state["qty"] = detect_quantity(
+            text
+        )
+
     # -----------------------------------------
     # CANCEL / RESET
     # -----------------------------------------
@@ -798,6 +992,65 @@ def handle_message(
         return (
             "✅ تمام، لغيت المحادثة الحالية. "
             "فيك تبدأ من جديد."
+        )
+
+    # -----------------------------------------
+    # CONFIRM / EDIT ORDER
+    # -----------------------------------------
+
+    if (
+        state["done"]
+        and n in CONFIRM_WORDS
+    ):
+
+        return (
+            "طلبك مسجل مسبقاً ✅ "
+            f"رقم الطلب: "
+            f"{state['order_id']}"
+        )
+
+    if state["awaiting_confirmation"]:
+
+        if n in CONFIRM_WORDS:
+
+            return complete_order(
+                state,
+                text,
+            )
+
+        if n in EDIT_WORDS:
+
+            return (
+                "تمام 👍 ابعت المعلومة الجديدة "
+                "مباشرة، مثلاً:\n"
+                "• الاسم: أحمد\n"
+                "• الهاتف: 09xxxxxxxx\n"
+                "• المدينة: حلب\n"
+                "• الكمية: 3"
+            )
+
+        if (
+            phone
+            or city
+            or product
+            or name
+            or contains_any(
+                text,
+                [
+                    "الكمية",
+                    "الكميه",
+                    "العدد",
+                ],
+            )
+        ):
+
+            return order_review_text(
+                state
+            )
+
+        return (
+            "طلبك جاهز للتأكيد 👍\n\n"
+            + order_review_text(state)
         )
 
     # -----------------------------------------
@@ -977,6 +1230,10 @@ def handle_message(
 
         state["done"] = False
 
+        state["awaiting_confirmation"] = False
+
+        state["customer_message"] = text
+
         state["qty"] = (
             detect_quantity(text)
         )
@@ -1036,48 +1293,11 @@ def handle_message(
                 "أعرف المدينة للتوصيل."
             )
 
-        # Duplicate protection
-        if state["done"]:
+        # Review before writing the order
+        state["awaiting_confirmation"] = True
 
-            return (
-                "طلبك مسجل مسبقاً ✅ "
-                f"رقم الطلب: "
-                f"{state['order_id']}"
-            )
-
-        # Create order
-        order_id = create_order(
-            state,
-            text,
-        )
-
-        state["done"] = True
-
-        state["order_id"] = order_id
-
-        data = PRODUCTS[
-            state["product"]
-        ]
-
-        total = (
-            data["price"]
-            * state["qty"]
-        )
-
-        if float(total).is_integer():
-            total = int(total)
-
-        return (
-            "✅ تم تسجيل طلبك بنجاح\n\n"
-            f"رقم الطلب: {order_id}\n"
-            f"الاسم: {state['name']}\n"
-            f"المنتج: {state['product']}\n"
-            f"الكمية: {state['qty']}\n"
-            f"الإجمالي: "
-            f"{total}{data['currency']}\n"
-            f"المدينة: {state['city']}\n"
-            f"التوصيل: "
-            f"{DELIVERY.get(state['city'], '2-4 أيام')}"
+        return order_review_text(
+            state
         )
 
     return (
@@ -1144,6 +1364,14 @@ def register_webhook():
             json={
                 "url": url,
                 "drop_pending_updates": False,
+                **(
+                    {
+                        "secret_token":
+                        WEBHOOK_SECRET,
+                    }
+                    if WEBHOOK_SECRET
+                    else {}
+                ),
             },
             timeout=20,
         )
@@ -1232,12 +1460,43 @@ def webhook_info():
 @app.post("/telegram")
 def telegram_webhook():
 
+    if (
+        WEBHOOK_SECRET
+        and request.headers.get(
+            "X-Telegram-Bot-Api-Secret-Token",
+            "",
+        )
+        != WEBHOOK_SECRET
+    ):
+
+        return jsonify(
+            {
+                "ok": False,
+                "error": "unauthorized",
+            }
+        ), 403
+
     update = (
         request.get_json(
             silent=True
         )
         or {}
     )
+
+    update_id = update.get(
+        "update_id"
+    )
+
+    if update_was_processed(
+        update_id
+    ):
+
+        return jsonify(
+            {
+                "ok": True,
+                "duplicate": True,
+            }
+        )
 
     message = update.get(
         "message",
@@ -1257,6 +1516,11 @@ def telegram_webhook():
         not text
         or chat_id is None
     ):
+
+        remember_update(
+            update_id
+        )
+
         return jsonify(
             {
                 "ok": True,
@@ -1300,6 +1564,10 @@ def telegram_webhook():
             "sendMessage",
             chat_id=chat_id,
             text=answer,
+        )
+
+        remember_update(
+            update_id
         )
 
     except Exception as exc:
