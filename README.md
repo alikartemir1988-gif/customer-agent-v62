@@ -96,6 +96,9 @@ Allowed order statuses:
 - `delivered`
 - `cancelled`
 
+The orders endpoint accepts integer limits from 1 to 200. Invalid limits or status
+filters return a structured `400` response instead of an internal server error.
+
 ## Health endpoints
 
 - `GET /`

@@ -48,6 +48,10 @@ DEFAULT_DELIVERY = {
     "الحسكة": "2-4 أيام",
 }
 
+ORDER_STATUSES = frozenset({
+    "new", "confirmed", "processing", "shipped", "delivered", "cancelled",
+})
+
 CITIES = [
     "ريف دمشق", "أشرفية صحنايا", "معضمية الشام", "دير عطية", "رأس العين",
     "جسر الشغور", "معرة النعمان", "معرة مصرين", "بصرى الشام", "تل أبيض",
@@ -293,6 +297,14 @@ def is_delivery_question(text):
 def money(value):
     value = float(value)
     return int(value) if value.is_integer() else round(value, 2)
+
+
+def parse_order_limit(value, default=50, maximum=200):
+    try:
+        parsed = int(default if value is None else value)
+    except (TypeError, ValueError):
+        return None
+    return min(max(parsed, 1), maximum)
 
 
 def product_list_text():
@@ -562,7 +574,20 @@ def setup_webhook():
 @admin_required
 def admin_orders():
     status = request.args.get("status", "").strip()
-    limit = min(max(int(request.args.get("limit", "50")), 1), 200)
+    if status and status not in ORDER_STATUSES:
+        return jsonify({
+            "ok": False,
+            "error": "invalid status",
+            "allowed": sorted(ORDER_STATUSES),
+        }), 400
+    limit = parse_order_limit(request.args.get("limit"))
+    if limit is None:
+        return jsonify({
+            "ok": False,
+            "error": "limit must be an integer",
+            "minimum": 1,
+            "maximum": 200,
+        }), 400
     conn = db_connect()
     if status:
         rows = conn.execute(
@@ -593,11 +618,14 @@ def admin_stats():
 @app.patch("/admin/orders/<int:order_id>/status")
 @admin_required
 def update_order_status(order_id):
-    allowed = {"new", "confirmed", "processing", "shipped", "delivered", "cancelled"}
     payload = request.get_json(silent=True) or {}
     status = str(payload.get("status", "")).strip().lower()
-    if status not in allowed:
-        return jsonify({"ok": False, "error": "invalid status", "allowed": sorted(allowed)}), 400
+    if status not in ORDER_STATUSES:
+        return jsonify({
+            "ok": False,
+            "error": "invalid status",
+            "allowed": sorted(ORDER_STATUSES),
+        }), 400
     conn = db_connect()
     cursor = conn.execute(
         "UPDATE orders SET status=?, updated_at=? WHERE id=?", (status, utc_now(), order_id)

@@ -44,6 +44,26 @@ class CustomerAgentTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["total_orders"], 0)
 
+    def test_admin_orders_rejects_non_integer_limit(self):
+        response = self.client.get(
+            "/admin/orders?limit=all",
+            headers={"X-Admin-Key": "test-admin-key"},
+        )
+        self.assertEqual(response.status_code, 400)
+        payload = response.get_json()
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"], "limit must be an integer")
+
+    def test_admin_orders_rejects_unknown_status(self):
+        response = self.client.get(
+            "/admin/orders?status=unknown",
+            headers={"X-Admin-Key": "test-admin-key"},
+        )
+        self.assertEqual(response.status_code, 400)
+        payload = response.get_json()
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"], "invalid status")
+
     def test_telegram_webhook_rejects_wrong_secret(self):
         response = self.client.post(
             "/telegram",

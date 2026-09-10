@@ -6,7 +6,7 @@ from functools import wraps
 
 from flask import Flask, redirect, render_template, request, session, url_for
 
-from app import db_connect, utc_now
+from app import ORDER_STATUSES, db_connect, utc_now
 
 
 ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "").strip()
@@ -98,8 +98,7 @@ def logout():
 @dashboard_required
 def dashboard():
     status_filter = request.args.get("status", "").strip().lower()
-    allowed = {"new", "confirmed", "processing", "shipped", "delivered", "cancelled"}
-    if status_filter and status_filter not in allowed:
+    if status_filter and status_filter not in ORDER_STATUSES:
         status_filter = ""
 
     conn = db_connect()
@@ -129,7 +128,7 @@ def dashboard():
         "dashboard.html",
         orders=[dict(row) for row in orders],
         status_filter=status_filter,
-        allowed_statuses=sorted(allowed),
+        allowed_statuses=sorted(ORDER_STATUSES),
         total_orders=total_orders,
         active_orders=active_orders,
         delivered_orders=delivered_orders,
@@ -143,9 +142,8 @@ def dashboard():
 def change_order_status(order_id):
     if not csrf_valid():
         return "Invalid CSRF token", 400
-    allowed = {"new", "confirmed", "processing", "shipped", "delivered", "cancelled"}
     status = request.form.get("status", "").strip().lower()
-    if status not in allowed:
+    if status not in ORDER_STATUSES:
         return "Invalid status", 400
 
     conn = db_connect()
