@@ -6,7 +6,7 @@ from functools import wraps
 
 from flask import Flask, redirect, render_template, request, session, url_for
 
-from app import ORDER_STATUSES, db_connect, utc_now
+from app import ORDER_STATUSES, db_connect, set_order_status
 
 
 ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "").strip()
@@ -162,16 +162,8 @@ def change_order_status(order_id):
     if status not in ORDER_STATUSES:
         return "Invalid status", 400
 
-    conn = db_connect()
-    cursor = conn.execute(
-        "UPDATE orders SET status=?, updated_at=? WHERE id=?",
-        (status, utc_now(), order_id),
-    )
-    conn.commit()
-    changed = cursor.rowcount
-    conn.close()
-
-    if not changed:
+    change = set_order_status(order_id, status, "dashboard")
+    if change is None:
         return "Order not found", 404
     return redirect(request.referrer or url_for("dashboard"))
 

@@ -17,6 +17,7 @@ class DashboardSecurityTests(unittest.TestCase):
         self.client = customer_dashboard.dashboard_app.test_client()
         customer_dashboard.ADMIN_API_KEY = "test-admin-key"
         conn = customer_agent.db_connect()
+        conn.execute("DELETE FROM order_status_events")
         conn.execute("DELETE FROM sessions")
         conn.execute("DELETE FROM orders")
         conn.commit()
@@ -89,8 +90,16 @@ class DashboardSecurityTests(unittest.TestCase):
         status = conn.execute(
             "SELECT status FROM orders WHERE id=?", (order_id,)
         ).fetchone()["status"]
+        event = conn.execute(
+            """
+            SELECT old_status, new_status, source
+            FROM order_status_events WHERE order_id=?
+            """,
+            (order_id,),
+        ).fetchone()
         conn.close()
         self.assertEqual(status, "confirmed")
+        self.assertEqual(tuple(event), ("new", "confirmed", "dashboard"))
 
     def test_dashboard_search_finds_customer_and_preserves_status_filter(self):
         self.create_order(name="أحمد المميز", phone="0933111111")

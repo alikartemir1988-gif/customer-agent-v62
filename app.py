@@ -199,9 +199,20 @@ def init_db():
             processed_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS order_status_events(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+            old_status TEXT,
+            new_status TEXT NOT NULL,
+            source TEXT NOT NULL,
+            changed_at TEXT NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);
         CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
         CREATE INDEX IF NOT EXISTS idx_orders_phone ON orders(customer_phone);
+        CREATE INDEX IF NOT EXISTS idx_order_status_events_order_id
+            ON order_status_events(order_id, id);
         """
     )
     conn.commit()
@@ -575,9 +586,51 @@ def create_order(chat_id, state, original_text):
         ),
     )
     order_id = cursor.lastrowid
+    conn.execute(
+        """
+        INSERT INTO order_status_events(
+            order_id, old_status, new_status, source, changed_at
+        ) VALUES(?,?,?,?,?)
+        """,
+        (order_id, None, "new", "telegram", now),
+    )
     conn.commit()
     conn.close()
     return order_id
+
+
+def set_order_status(order_id, new_status, source):
+    conn = db_connect()
+    conn.execute("BEGIN IMMEDIATE")
+    row = conn.execute(
+        "SELECT status FROM orders WHERE id=?", (order_id,)
+    ).fetchone()
+    if not row:
+        conn.rollback()
+        conn.close()
+        return None
+
+    old_status = row["status"]
+    changed_at = utc_now()
+    conn.execute(
+        "UPDATE orders SET status=?, updated_at=? WHERE id=?",
+        (new_status, changed_at, order_id),
+    )
+    conn.execute(
+        """
+        INSERT INTO order_status_events(
+            order_id, old_status, new_status, source, changed_at
+        ) VALUES(?,?,?,?,?)
+        """,
+        (order_id, old_status, new_status, source, changed_at),
+    )
+    conn.commit()
+    conn.close()
+    return {
+        "old_status": old_status,
+        "new_status": new_status,
+        "changed_at": changed_at,
+    }
 
 
 def maybe_capture_name(state, text):
@@ -900,16 +953,41 @@ def update_order_status(order_id):
             "error": "invalid status",
             "allowed": sorted(ORDER_STATUSES),
         }), 400
-    conn = db_connect()
-    cursor = conn.execute(
-        "UPDATE orders SET status=?, updated_at=? WHERE id=?", (status, utc_now(), order_id)
-    )
-    conn.commit()
-    changed = cursor.rowcount
-    conn.close()
-    if not changed:
+    change = set_order_status(order_id, status, "admin_api")
+    if change is None:
         return jsonify({"ok": False, "error": "order not found"}), 404
-    return jsonify({"ok": True, "order_id": order_id, "status": status})
+    return jsonify({
+        "ok": True,
+        "order_id": order_id,
+        "status": status,
+        "previous_status": change["old_status"],
+        "changed_at": change["changed_at"],
+    })
+
+
+@app.get("/admin/orders/<int:order_id>/history")
+@admin_required
+def order_status_history(order_id):
+    conn = db_connect()
+    order = conn.execute("SELECT id FROM orders WHERE id=?", (order_id,)).fetchone()
+    if not order:
+        conn.close()
+        return jsonify({"ok": False, "error": "order not found"}), 404
+    rows = conn.execute(
+        """
+        SELECT id, old_status, new_status, source, changed_at
+        FROM order_status_events
+        WHERE order_id=?
+        ORDER BY id ASC
+        """,
+        (order_id,),
+    ).fetchall()
+    conn.close()
+    return jsonify({
+        "ok": True,
+        "order_id": order_id,
+        "events": [dict(row) for row in rows],
+    })
 
 
 @app.get("/webhook-info")

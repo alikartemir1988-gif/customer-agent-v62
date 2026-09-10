@@ -19,6 +19,7 @@ class CustomerAgentTests(unittest.TestCase):
         self.client = customer_agent.app.test_client()
         conn = customer_agent.db_connect()
         conn.execute("DELETE FROM sessions")
+        conn.execute("DELETE FROM order_status_events")
         conn.execute("DELETE FROM orders")
         conn.execute("DELETE FROM processed_updates")
         conn.commit()
@@ -194,6 +195,40 @@ class CustomerAgentTests(unittest.TestCase):
             "total": 3,
             "has_more": True,
         })
+
+    def test_order_status_changes_have_protected_audit_history(self):
+        chat_id = 2201
+        customer_agent.handle_message(chat_id, "بدي اشتري الجهاز")
+        customer_agent.handle_message(chat_id, "اسمي رامي علي")
+        customer_agent.handle_message(chat_id, "0933555555")
+        customer_agent.handle_message(chat_id, "دمشق")
+
+        conn = customer_agent.db_connect()
+        order_id = conn.execute(
+            "SELECT id FROM orders WHERE chat_id=?", (str(chat_id),)
+        ).fetchone()["id"]
+        conn.close()
+
+        changed = self.client.patch(
+            f"/admin/orders/{order_id}/status",
+            json={"status": "processing"},
+            headers={"X-Admin-Key": "test-admin-key"},
+        )
+        history = self.client.get(
+            f"/admin/orders/{order_id}/history",
+            headers={"X-Admin-Key": "test-admin-key"},
+        )
+
+        self.assertEqual(changed.status_code, 200)
+        self.assertEqual(changed.get_json()["previous_status"], "new")
+        self.assertEqual(history.status_code, 200)
+        events = history.get_json()["events"]
+        self.assertEqual(len(events), 2)
+        self.assertEqual(events[0]["new_status"], "new")
+        self.assertEqual(events[0]["source"], "telegram")
+        self.assertEqual(events[1]["old_status"], "new")
+        self.assertEqual(events[1]["new_status"], "processing")
+        self.assertEqual(events[1]["source"], "admin_api")
 
     def test_telegram_webhook_rejects_wrong_secret(self):
         response = self.client.post(

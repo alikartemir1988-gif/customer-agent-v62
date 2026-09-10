@@ -14,6 +14,7 @@ Arabic-first Telegram sales and order automation for merchants.
 - Prevents duplicate order creation within an active completed session.
 - Provides a protected admin API for order management and sales statistics.
 - Provides dashboard search by customer, phone, order number, product, or city.
+- Keeps an immutable audit history for order creation and every status update.
 - Supports configurable products and delivery rules through environment variables.
 - Supports Telegram webhook secret verification.
 - Processes each Telegram update once, while allowing safe retry after transient failures.
@@ -92,6 +93,7 @@ Endpoints:
 - `GET /admin/orders?status=new&limit=50&offset=0`
 - `GET /admin/stats`
 - `PATCH /admin/orders/<id>/status`
+- `GET /admin/orders/<id>/history`
 - `POST /admin/setup-webhook`
 
 Allowed order statuses:
