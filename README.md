@@ -7,6 +7,7 @@ Arabic-first Telegram sales and order automation for merchants.
 - Answers common product, pricing and delivery questions in Arabic.
 - Answers color and payment-method questions from configurable product data.
 - Combines answers when an Arabic message contains several recognized questions.
+- Answers information questions during an active order, then resumes the exact missing step without losing progress.
 - Detects purchase intent and guides customers through an order flow.
 - Captures customer name, phone, city, product and quantity.
 - Stores orders and conversation state persistently in SQLite.

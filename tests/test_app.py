@@ -151,6 +151,36 @@ class CustomerAgentTests(unittest.TestCase):
         self.assertIn("التوصيل إلى حمص", delivery)
         self.assertIn("2-4 أيام", delivery)
 
+    def test_color_question_during_order_preserves_and_resumes_flow(self):
+        chat_id = 7008
+
+        started = customer_agent.handle_message(chat_id, "بدي اشتري الجهاز")
+        self.assertIn("اسم", started)
+
+        color_answer = customer_agent.handle_message(chat_id, "كم لون عندكم")
+        self.assertIn("ألوان الجهاز", color_answer)
+        self.assertIn("أسود", color_answer)
+        self.assertIn("طلبك الحالي ما زال محفوظاً", color_answer)
+        self.assertIn("شو اسمك", color_answer)
+        self.assertNotIn("فهمت عليك جزئياً", color_answer)
+
+        customer_agent.handle_message(chat_id, "اسمي أحمد علي")
+        customer_agent.handle_message(chat_id, "+963 944 123 456")
+        completed = customer_agent.handle_message(chat_id, "دمشق")
+        self.assertIn("تم تسجيل طلبك", completed)
+
+        after_completion = customer_agent.handle_message(chat_id, "كم لون عندكم")
+        self.assertIn("ألوان الجهاز", after_completion)
+        self.assertIn("طلبك مسجل مسبقاً", after_completion)
+
+        conn = customer_agent.db_connect()
+        count = conn.execute(
+            "SELECT COUNT(*) AS c FROM orders WHERE chat_id=?",
+            (str(chat_id),),
+        ).fetchone()["c"]
+        conn.close()
+        self.assertEqual(count, 1)
+
     def test_order_flow_persists_one_order_and_blocks_duplicate(self):
         chat_id = 9001
 

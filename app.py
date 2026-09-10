@@ -434,6 +434,22 @@ def combine_answers(answers, next_message):
     return "\n\n".join([*answers, next_message]) if answers else next_message
 
 
+def order_resume_prompt(state):
+    if not state.get("buying"):
+        return None
+    if state.get("done"):
+        return f"طلبك مسجل مسبقاً ✅ رقم الطلب: {state.get('order_id')}"
+    if not state.get("product"):
+        return "وطلبك الحالي ما زال محفوظاً؛ شو المنتج اللي بدك تطلبه؟"
+    if not state.get("name"):
+        return "وطلبك الحالي ما زال محفوظاً؛ شو اسمك حتى نكمله؟"
+    if not state.get("phone"):
+        return f"وطلبك الحالي ما زال محفوظاً يا {state['name']}؛ ابعتلي رقم الهاتف."
+    if not state.get("city"):
+        return "وطلبك الحالي ما زال محفوظاً؛ بقي بس أعرف مدينة التوصيل."
+    return "وطلبك الحالي ما زال محفوظاً وجاهزاً للإكمال."
+
+
 # =========================================================
 # ORDERS
 # =========================================================
@@ -516,6 +532,9 @@ def handle_message(chat_id, text):
     answers = informational_answers(text, state, product, city)
     if not buy_intent:
         if answers:
+            resume_prompt = order_resume_prompt(state)
+            if resume_prompt:
+                answers.append(resume_prompt)
             save_session(chat_id, state)
             return "\n\n".join(answers)
 
