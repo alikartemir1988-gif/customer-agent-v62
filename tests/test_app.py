@@ -20,6 +20,7 @@ class CustomerAgentTests(unittest.TestCase):
         conn = customer_agent.db_connect()
         conn.execute("DELETE FROM sessions")
         conn.execute("DELETE FROM orders")
+        conn.execute("DELETE FROM processed_updates")
         conn.commit()
         conn.close()
 
@@ -72,6 +73,45 @@ class CustomerAgentTests(unittest.TestCase):
             headers={"X-Telegram-Bot-Api-Secret-Token": "wrong"},
         )
         self.assertEqual(response.status_code, 401)
+
+    def test_duplicate_telegram_update_is_processed_once(self):
+        payload = {
+            "update_id": 12345,
+            "message": {"text": "/start", "chat": {"id": 42}},
+        }
+        headers = {"X-Telegram-Bot-Api-Secret-Token": "test-webhook-secret"}
+
+        with mock.patch.object(customer_agent, "telegram_api") as send_mock:
+            first = self.client.post("/telegram", json=payload, headers=headers)
+            duplicate = self.client.post("/telegram", json=payload, headers=headers)
+
+        self.assertEqual(first.status_code, 200)
+        self.assertTrue(first.get_json()["ok"])
+        self.assertEqual(duplicate.status_code, 200)
+        self.assertTrue(duplicate.get_json()["duplicate"])
+        send_mock.assert_called_once()
+
+    def test_failed_telegram_update_can_be_retried(self):
+        payload = {
+            "update_id": 12346,
+            "message": {"text": "/start", "chat": {"id": 43}},
+        }
+        headers = {"X-Telegram-Bot-Api-Secret-Token": "test-webhook-secret"}
+
+        with mock.patch.object(
+            customer_agent,
+            "telegram_api",
+            side_effect=[RuntimeError("temporary failure"), {"ok": True}],
+        ) as send_mock:
+            failed = self.client.post("/telegram", json=payload, headers=headers)
+            retried = self.client.post("/telegram", json=payload, headers=headers)
+
+        self.assertEqual(failed.status_code, 200)
+        self.assertFalse(failed.get_json()["ok"])
+        self.assertEqual(retried.status_code, 200)
+        self.assertTrue(retried.get_json()["ok"])
+        self.assertNotIn("duplicate", retried.get_json())
+        self.assertEqual(send_mock.call_count, 2)
 
     def test_webhook_info_does_not_expose_bot_token_on_failure(self):
         secret_token = "secret-token-that-must-not-leak"

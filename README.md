@@ -15,6 +15,7 @@ Arabic-first Telegram sales and order automation for merchants.
 - Provides a protected admin API for order management and sales statistics.
 - Supports configurable products and delivery rules through environment variables.
 - Supports Telegram webhook secret verification.
+- Processes each Telegram update once, while allowing safe retry after transient failures.
 - Includes health endpoints suitable for cloud hosting.
 
 ## Commercial positioning

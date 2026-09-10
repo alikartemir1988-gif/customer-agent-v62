@@ -136,6 +136,11 @@ def init_db():
             updated_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS processed_updates(
+            update_id INTEGER PRIMARY KEY,
+            processed_at TEXT NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);
         CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
         CREATE INDEX IF NOT EXISTS idx_orders_phone ON orders(customer_phone);
@@ -194,6 +199,35 @@ def save_session(chat_id, state):
 def reset(chat_id):
     conn = db_connect()
     conn.execute("DELETE FROM sessions WHERE chat_id=?", (str(chat_id),))
+    conn.commit()
+    conn.close()
+
+
+def claim_update(update_id):
+    """Atomically reserve a Telegram update so concurrent deliveries run once."""
+    if update_id is None:
+        return True
+    conn = db_connect()
+    cursor = conn.execute(
+        "INSERT OR IGNORE INTO processed_updates(update_id, processed_at) VALUES(?,?)",
+        (update_id, utc_now()),
+    )
+    conn.execute(
+        "DELETE FROM processed_updates WHERE update_id < ?",
+        (update_id - 10000,),
+    )
+    conn.commit()
+    claimed = cursor.rowcount == 1
+    conn.close()
+    return claimed
+
+
+def release_update(update_id):
+    """Allow Telegram to retry an update whose processing did not complete."""
+    if update_id is None:
+        return
+    conn = db_connect()
+    conn.execute("DELETE FROM processed_updates WHERE update_id=?", (update_id,))
     conn.commit()
     conn.close()
 
@@ -800,6 +834,11 @@ def telegram_webhook():
         return jsonify({"ok": False, "error": "unauthorized"}), 401
 
     update = request.get_json(silent=True) or {}
+    update_id = update.get("update_id")
+
+    if not claim_update(update_id):
+        return jsonify({"ok": True, "duplicate": True})
+
     message = update.get("message", {})
     text = message.get("text")
     chat_id = message.get("chat", {}).get("id")
@@ -823,6 +862,7 @@ def telegram_webhook():
 
         telegram_api("sendMessage", chat_id=chat_id, text=answer)
     except Exception as exc:
+        release_update(update_id)
         log_external_failure("Telegram update failed", exc)
         return jsonify({"ok": False, "error": "handled"}), 200
 
