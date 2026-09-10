@@ -125,6 +125,7 @@ checks stop a release that would otherwise use fallback catalog data.
 - Use a separate long random value for `DASHBOARD_SESSION_SECRET`; if omitted, the dashboard derives a stable fallback from `ADMIN_API_KEY`.
 - Dashboard state-changing forms are protected against cross-site request forgery (CSRF), and dashboard responses are marked non-cacheable.
 - Telegram transport failures expose only sanitized errors so bot tokens cannot leak through request URLs or logs.
+- HTTP request bodies are limited to 256 KiB; oversized webhook or admin requests receive a structured `413` response.
 - Rotate secrets after sharing them in insecure channels.
 - Keep customer phone/order data private and restrict admin API access.
 - For larger deployments, add HTTPS termination, managed PostgreSQL, rate limiting, backups, centralized logs and monitoring.

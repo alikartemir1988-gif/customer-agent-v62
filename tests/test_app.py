@@ -167,6 +167,26 @@ class CustomerAgentTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 401)
 
+    def test_telegram_webhook_rejects_oversized_payload(self):
+        headers = {
+            "X-Telegram-Bot-Api-Secret-Token": "test-webhook-secret",
+            "Content-Type": "application/json",
+        }
+
+        with mock.patch.object(customer_agent, "telegram_api") as send_mock:
+            response = self.client.post(
+                "/telegram",
+                data=b"x" * (customer_agent.MAX_REQUEST_BYTES + 1),
+                headers=headers,
+            )
+
+        self.assertEqual(response.status_code, 413)
+        payload = response.get_json()
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"], "request payload too large")
+        self.assertEqual(payload["max_bytes"], customer_agent.MAX_REQUEST_BYTES)
+        send_mock.assert_not_called()
+
     def test_duplicate_telegram_update_is_processed_once(self):
         payload = {
             "update_id": 12345,

@@ -25,6 +25,8 @@ PORT = int(os.environ.get("PORT", "10000"))
 API = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
 app = Flask(__name__)
 TELEGRAM_REQUEST_ERROR = "telegram request failed"
+MAX_REQUEST_BYTES = 256 * 1024
+app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BYTES
 
 
 DEFAULT_PRODUCTS = {
@@ -763,6 +765,15 @@ def admin_required(fn):
             return jsonify({"ok": False, "error": "unauthorized"}), 401
         return fn(*args, **kwargs)
     return wrapped
+
+
+@app.errorhandler(413)
+def request_too_large(_error):
+    return jsonify({
+        "ok": False,
+        "error": "request payload too large",
+        "max_bytes": MAX_REQUEST_BYTES,
+    }), 413
 
 
 @app.get("/")
