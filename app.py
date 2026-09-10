@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -20,9 +22,13 @@ except ImportError:  # Optional for local SQLite development.
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "").strip()
 WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "").strip()
+META_PAGE_ACCESS_TOKEN = os.environ.get("META_PAGE_ACCESS_TOKEN", "").strip()
+META_VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN", "").strip()
+META_APP_SECRET = os.environ.get("META_APP_SECRET", "").strip()
+META_GRAPH_VERSION = os.environ.get("META_GRAPH_VERSION", "v23.0").strip()
 DB_PATH = os.environ.get("DB_PATH", "customer_agent.db").strip()
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
-APP_VERSION = "6.2.3"
+APP_VERSION = "6.3.0"
 GIT_COMMIT = os.environ.get("RENDER_GIT_COMMIT", "").strip()
 
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -332,6 +338,15 @@ def init_db():
 
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS processed_messages(
+            message_id TEXT PRIMARY KEY,
+            processed_at TEXT NOT NULL
+        )
+        """
+    )
+
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS sessions(
             chat_id TEXT PRIMARY KEY,
             state_json TEXT NOT NULL,
@@ -397,6 +412,46 @@ def remember_update(update_id):
         (update_id - 10000,),
     )
 
+    conn.commit()
+    conn.close()
+
+
+def message_was_processed(message_id):
+
+    if not message_id:
+        return False
+
+    conn = db_connect()
+    row = conn.execute(
+        db_sql("""
+        SELECT 1
+        FROM processed_messages
+        WHERE message_id = ?
+        """),
+        (str(message_id),),
+    ).fetchone()
+    conn.close()
+
+    return row is not None
+
+
+def remember_message(message_id):
+
+    if not message_id:
+        return
+
+    conn = db_connect()
+    conn.execute(
+        db_sql("""
+        INSERT INTO processed_messages(message_id, processed_at)
+        VALUES(?,?)
+        ON CONFLICT(message_id) DO NOTHING
+        """),
+        (
+            str(message_id),
+            datetime.now().isoformat(timespec="seconds"),
+        ),
+    )
     conn.commit()
     conn.close()
 
@@ -1627,6 +1682,39 @@ def telegram_api(method, **data):
     return response.json()
 
 
+def messenger_signature_is_valid(raw_body, signature):
+
+    if not META_APP_SECRET or not signature:
+        return False
+
+    expected = "sha256=" + hmac.new(
+        META_APP_SECRET.encode("utf-8"),
+        raw_body,
+        hashlib.sha256,
+    ).hexdigest()
+
+    return hmac.compare_digest(expected, signature)
+
+
+def messenger_send_text(recipient_id, text):
+
+    if not META_PAGE_ACCESS_TOKEN:
+        raise RuntimeError("META_PAGE_ACCESS_TOKEN is missing")
+
+    response = requests.post(
+        f"https://graph.facebook.com/{META_GRAPH_VERSION}/me/messages",
+        params={"access_token": META_PAGE_ACCESS_TOKEN},
+        json={
+            "messaging_type": "RESPONSE",
+            "recipient": {"id": str(recipient_id)},
+            "message": {"text": text},
+        },
+        timeout=20,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
 def resolved_webhook_url():
 
     if not WEBHOOK_URL:
@@ -1899,6 +1987,65 @@ def telegram_webhook():
             "ok": True,
         }
     )
+
+
+@app.get("/messenger")
+def messenger_verify_webhook():
+
+    if not META_VERIFY_TOKEN:
+        return "Messenger webhook is not configured", 503
+
+    if (
+        request.args.get("hub.mode") == "subscribe"
+        and request.args.get("hub.verify_token") == META_VERIFY_TOKEN
+    ):
+        return request.args.get("hub.challenge", ""), 200
+
+    return "Forbidden", 403
+
+
+@app.post("/messenger")
+def messenger_webhook():
+
+    raw_body = request.get_data(cache=True)
+    signature = request.headers.get("X-Hub-Signature-256", "")
+
+    if not messenger_signature_is_valid(raw_body, signature):
+        return jsonify({"ok": False, "error": "unauthorized"}), 403
+
+    payload = request.get_json(silent=True) or {}
+
+    if payload.get("object") != "page":
+        return jsonify({"ok": True, "ignored": True})
+
+    try:
+        for entry in payload.get("entry", []):
+            for event in entry.get("messaging", []):
+                sender_id = (event.get("sender") or {}).get("id")
+                message = event.get("message") or {}
+                message_id = message.get("mid")
+                text = message.get("text")
+
+                if (
+                    not sender_id
+                    or not text
+                    or message.get("is_echo")
+                    or message_was_processed(message_id)
+                ):
+                    continue
+
+                answer = handle_message(
+                    f"messenger:{sender_id}",
+                    text,
+                )
+                messenger_send_text(sender_id, answer)
+                remember_message(message_id)
+
+    except Exception as exc:
+        print("Messenger update error:", repr(exc))
+        return jsonify({"ok": False, "error": "handled"}), 500
+
+    return jsonify({"ok": True})
 
 
 init_db()
