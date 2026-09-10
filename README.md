@@ -1,6 +1,7 @@
 # Customer Agent V6.2
 
-A Telegram sales assistant that answers product, pricing, and delivery questions and records confirmed customer orders.
+A Telegram and Facebook Messenger sales assistant that answers product, pricing,
+and delivery questions and records confirmed customer orders.
 
 ## Current behavior
 
@@ -12,6 +13,7 @@ A Telegram sales assistant that answers product, pricing, and delivery questions
 - Restores an unfinished or completed conversation after an app restart.
 - Ignores Telegram updates that were already processed.
 - Supports an optional Telegram webhook secret.
+- Supports Meta webhook verification, signed Messenger events, and duplicate-message protection.
 
 ## Required environment variables
 
@@ -19,10 +21,14 @@ A Telegram sales assistant that answers product, pricing, and delivery questions
 - `WEBHOOK_URL`: Public HTTPS base URL of this service.
 - `DATABASE_URL`: PostgreSQL connection URL. Render supplies this automatically
   when the database is linked to the web service.
+- `META_PAGE_ACCESS_TOKEN`: Page access token created by Meta for the connected Facebook Page.
+- `META_VERIFY_TOKEN`: A private random value used while configuring the Meta webhook.
+- `META_APP_SECRET`: Meta App Secret used to verify signed webhook requests.
 
 ## Optional environment variables
 
 - `TELEGRAM_WEBHOOK_SECRET`: Random secret used to verify that webhook requests came from Telegram.
+- `META_GRAPH_VERSION`: Graph API version used for replies (default: `v23.0`).
 - `DB_PATH`: SQLite database path used only when `DATABASE_URL` is absent
   (default: `customer_agent.db`).
 - `PORT`: HTTP port when starting with Python (default: `8000`).
@@ -53,6 +59,8 @@ Tests also run automatically on every push and pull request.
 
 - `GET /`: service health, app version, and deployed Render commit.
 - `GET /webhook-info`: Telegram webhook status.
+- `GET /messenger`: Meta webhook verification endpoint.
+- `POST /messenger`: Signed Facebook Messenger message webhook.
 
 ## Storage note
 
