@@ -111,6 +111,10 @@ filters return a structured `400` response instead of an internal server error.
 - `GET /health`
 - `GET /webhook-info`
 
+`/health` returns `503` with named configuration errors when `PRODUCTS_JSON` or
+`DELIVERY_JSON` is malformed, while never echoing the configured value. This lets
+deployment health checks stop a release that would otherwise use fallback catalog data.
+
 ## Security
 
 - Never commit Telegram tokens, admin keys, wallet addresses intended to stay private, passwords or exchange credentials.

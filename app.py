@@ -76,6 +76,8 @@ CITIES = [
     "السويداء", "شهبا", "صلخد", "القريا", "القنيطرة", "خان ارنبة", "البعث",
 ]
 
+CONFIGURATION_ERRORS = []
+
 
 def _json_env(name, default):
     raw = os.environ.get(name, "").strip()
@@ -83,9 +85,16 @@ def _json_env(name, default):
         return default
     try:
         value = json.loads(raw)
-        return value if isinstance(value, dict) else default
     except json.JSONDecodeError:
+        CONFIGURATION_ERRORS.append(f"{name} must be valid JSON")
         return default
+    if not isinstance(value, dict):
+        CONFIGURATION_ERRORS.append(f"{name} must be a JSON object")
+        return default
+    if not value:
+        CONFIGURATION_ERRORS.append(f"{name} must not be empty")
+        return default
+    return value
 
 
 PRODUCTS = _json_env("PRODUCTS_JSON", DEFAULT_PRODUCTS)
@@ -723,12 +732,16 @@ def health():
         db_ok = True
     except Exception:
         db_ok = False
+    config_ok = not CONFIGURATION_ERRORS
+    healthy = db_ok and config_ok
     return jsonify({
-        "ok": db_ok,
+        "ok": healthy,
         "database": "ok" if db_ok else "error",
+        "configuration": "ok" if config_ok else "error",
+        "configuration_errors": list(CONFIGURATION_ERRORS),
         "telegram_configured": bool(BOT_TOKEN),
         "webhook_url_configured": bool(WEBHOOK_URL),
-    }), 200 if db_ok else 500
+    }), 200 if healthy else 503
 
 
 @app.post("/admin/setup-webhook")

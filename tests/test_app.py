@@ -30,6 +30,53 @@ class CustomerAgentTests(unittest.TestCase):
         payload = response.get_json()
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["database"], "ok")
+        self.assertEqual(payload["configuration"], "ok")
+        self.assertEqual(payload["configuration_errors"], [])
+
+    def test_health_rejects_invalid_merchant_configuration(self):
+        with mock.patch.object(
+            customer_agent,
+            "CONFIGURATION_ERRORS",
+            ["PRODUCTS_JSON must be valid JSON"],
+        ):
+            response = self.client.get("/health")
+
+        self.assertEqual(response.status_code, 503)
+        payload = response.get_json()
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["database"], "ok")
+        self.assertEqual(payload["configuration"], "error")
+        self.assertEqual(
+            payload["configuration_errors"],
+            ["PRODUCTS_JSON must be valid JSON"],
+        )
+
+    def test_invalid_json_configuration_falls_back_without_exposing_value(self):
+        secret_value = '{"private":"must-not-appear"'
+        errors_before = list(customer_agent.CONFIGURATION_ERRORS)
+        customer_agent.CONFIGURATION_ERRORS.clear()
+
+        try:
+            with mock.patch.dict(
+                os.environ,
+                {"PRODUCTS_JSON": secret_value},
+            ):
+                loaded = customer_agent._json_env(
+                    "PRODUCTS_JSON",
+                    customer_agent.DEFAULT_PRODUCTS,
+                )
+
+            self.assertIs(loaded, customer_agent.DEFAULT_PRODUCTS)
+            self.assertEqual(
+                customer_agent.CONFIGURATION_ERRORS,
+                ["PRODUCTS_JSON must be valid JSON"],
+            )
+            self.assertNotIn(
+                secret_value,
+                " ".join(customer_agent.CONFIGURATION_ERRORS),
+            )
+        finally:
+            customer_agent.CONFIGURATION_ERRORS[:] = errors_before
 
     def test_admin_api_rejects_missing_key(self):
         response = self.client.get("/admin/stats")
