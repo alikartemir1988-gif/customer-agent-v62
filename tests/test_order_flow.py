@@ -234,6 +234,69 @@ class OrderFlowTests(unittest.TestCase):
         self.assertIsNone(state["name"])
         self.assertFalse(state["buying"])
 
+    def test_color_question_keeps_pending_order(self):
+        chat_id = 107
+
+        for message in (
+            "بدي الجهاز",
+            "ليلى أحمد",
+            "0933123456",
+            "الحسكة",
+        ):
+            customer_agent.handle_message(chat_id, message)
+
+        for question in (
+            "كم لون عندكم",
+            "ما هي الألوان المتوفرة",
+        ):
+            reply = customer_agent.handle_message(chat_id, question)
+            self.assertIn("ألوان الجهاز المتوفرة", reply)
+            self.assertIn("أسود", reply)
+            self.assertIn("أبيض", reply)
+            self.assertIn("ما زال جاهزاً للتأكيد", reply)
+            self.assertNotIn("فهمت عليك جزئياً", reply)
+            self.assertNotIn("راجع طلبك", reply)
+
+        confirmed = customer_agent.handle_message(chat_id, "تأكيد")
+
+        self.assertIn("تم تسجيل طلبك", confirmed)
+        self.assertEqual(self.order_count(), 1)
+
+    def test_color_and_payment_questions_share_one_answer(self):
+        chat_id = 108
+
+        for message in (
+            "بدي الجهاز",
+            "سامر علي",
+            "0944123456",
+            "دمشق",
+        ):
+            customer_agent.handle_message(chat_id, message)
+
+        reply = customer_agent.handle_message(
+            chat_id,
+            "ما هو لون الجهاز وما هي طرق الدفع",
+        )
+
+        self.assertIn("ألوان الجهاز المتوفرة", reply)
+        self.assertIn("طرق الدفع لـالجهاز", reply)
+        self.assertIn("الدفع عند الاستلام", reply)
+        self.assertIn("ما زال جاهزاً للتأكيد", reply)
+        self.assertNotIn("فهمت عليك جزئياً", reply)
+
+    def test_color_and_payment_questions_work_without_order(self):
+        chat_id = 109
+
+        reply = customer_agent.handle_message(
+            chat_id,
+            "ما هو لون الجهاز وما هي طرق الدفع",
+        )
+
+        self.assertIn("أسود", reply)
+        self.assertIn("أبيض", reply)
+        self.assertIn("الدفع عند الاستلام", reply)
+        self.assertNotIn("فهمت عليك جزئياً", reply)
+
 
 class TelegramWebhookTests(unittest.TestCase):
 

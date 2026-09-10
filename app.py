@@ -22,7 +22,7 @@ WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "").strip()
 WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "").strip()
 DB_PATH = os.environ.get("DB_PATH", "customer_agent.db").strip()
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
-APP_VERSION = "6.2.2"
+APP_VERSION = "6.2.3"
 GIT_COMMIT = os.environ.get("RENDER_GIT_COMMIT", "").strip()
 
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -41,6 +41,8 @@ PRODUCTS = {
         "price": 30.0,
         "currency": "$",
         "available": True,
+        "colors": ["أسود", "أبيض"],
+        "payment_methods": ["الدفع عند الاستلام"],
         "aliases": [
             "الجهاز",
             "جهاز",
@@ -55,6 +57,8 @@ PRODUCTS = {
         "price": 30.0,
         "currency": "$",
         "available": True,
+        "colors": ["أسود"],
+        "payment_methods": ["الدفع عند الاستلام"],
         "aliases": [
             "منتج تجريبي",
             "التجريبي",
@@ -793,6 +797,110 @@ def is_delivery_question(text):
     )
 
 
+def is_color_question(text):
+
+    return contains_any(
+        text,
+        [
+            "كم لون",
+            "ما هو لون",
+            "ماهو لون",
+            "ما هي الالوان",
+            "ماهي الالوان",
+            "ما هي الألوان",
+            "ماهي الألوان",
+            "الألوان المتوفرة",
+            "الالوان المتوفرة",
+            "شو اللون",
+            "شو الألوان",
+            "شو الالوان",
+            "لون الجهاز",
+        ],
+    )
+
+
+def is_payment_question(text):
+
+    return contains_any(
+        text,
+        [
+            "طرق الدفع",
+            "طريقة الدفع",
+            "ما هي طرق الدفع",
+            "ماهي طرق الدفع",
+            "كيف ادفع",
+            "كيف أدفع",
+            "الدفع عند الاستلام",
+        ],
+    )
+
+
+def product_for_answer(state, detected_product=None):
+
+    if detected_product:
+        return detected_product
+
+    product_name = state.get("product")
+
+    if product_name in PRODUCTS:
+        return product_name, PRODUCTS[product_name]
+
+    if len(PRODUCTS) == 1:
+        return next(iter(PRODUCTS.items()))
+
+    return None
+
+
+def product_information_answers(text, state, detected_product=None):
+
+    selected = product_for_answer(state, detected_product)
+    answers = []
+
+    if is_color_question(text):
+        if selected:
+            product_name, data = selected
+            colors = data.get("colors", [])
+            if colors:
+                answers.append(
+                    f"ألوان {product_name} المتوفرة: "
+                    + "، ".join(colors)
+                    + " ✅"
+                )
+            else:
+                answers.append(f"ألوان {product_name} غير محددة حالياً.")
+        else:
+            answers.append(
+                "لأي منتج تريد معرفة الألوان؟ "
+                + "، ".join(PRODUCTS)
+            )
+
+    if is_payment_question(text):
+        if selected:
+            product_name, data = selected
+            methods = data.get("payment_methods", [])
+            if methods:
+                answers.append(
+                    f"طرق الدفع لـ{product_name}: "
+                    + "، ".join(methods)
+                    + "."
+                )
+            else:
+                answers.append("طرق الدفع المتاحة غير محددة حالياً.")
+        else:
+            methods = []
+            for data in PRODUCTS.values():
+                for method in data.get("payment_methods", []):
+                    if method not in methods:
+                        methods.append(method)
+            answers.append(
+                "طرق الدفع المتاحة: "
+                + ("، ".join(methods) if methods else "غير محددة حالياً")
+                + "."
+            )
+
+    return answers
+
+
 # =========================================================
 # PRODUCT LIST
 # =========================================================
@@ -1161,6 +1269,12 @@ def _handle_message(
             f"{state['order_id']}"
         )
 
+    information_answers = product_information_answers(
+        text,
+        state,
+        product,
+    )
+
     if state["awaiting_confirmation"]:
 
         if n in CONFIRM_WORDS:
@@ -1179,6 +1293,14 @@ def _handle_message(
                 "• الهاتف: 09xxxxxxxx\n"
                 "• المدينة: حلب\n"
                 "• الكمية: 3"
+            )
+
+        if information_answers:
+
+            return (
+                "\n".join(information_answers)
+                + "\n\nطلبك ما زال جاهزاً للتأكيد؛ "
+                "اكتب: تأكيد لإكماله، أو تعديل لتغييره."
             )
 
         if (
@@ -1204,6 +1326,10 @@ def _handle_message(
             "طلبك جاهز للتأكيد 👍\n\n"
             + order_review_text(state)
         )
+
+    if information_answers:
+
+        return "\n".join(information_answers)
 
     # -----------------------------------------
     # GREETING
