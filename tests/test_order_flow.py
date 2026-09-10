@@ -20,6 +20,7 @@ class OrderFlowTests(unittest.TestCase):
         with sqlite3.connect(customer_agent.DB_PATH) as conn:
             conn.execute("DELETE FROM orders")
             conn.execute("DELETE FROM processed_updates")
+            conn.execute("DELETE FROM processed_messages")
             conn.execute("DELETE FROM sessions")
             conn.commit()
 
@@ -305,6 +306,7 @@ class TelegramWebhookTests(unittest.TestCase):
 
         with sqlite3.connect(customer_agent.DB_PATH) as conn:
             conn.execute("DELETE FROM processed_updates")
+            conn.execute("DELETE FROM processed_messages")
             conn.execute("DELETE FROM sessions")
             conn.commit()
 
@@ -352,6 +354,48 @@ class TelegramWebhookTests(unittest.TestCase):
 
         self.assertEqual(rejected.status_code, 403)
         self.assertEqual(accepted.status_code, 200)
+
+
+class MessengerWebhookTests(unittest.TestCase):
+
+    def setUp(self):
+        customer_agent.SESSIONS.clear()
+        with sqlite3.connect(customer_agent.DB_PATH) as conn:
+            conn.execute("DELETE FROM processed_messages")
+            conn.execute("DELETE FROM sessions")
+            conn.commit()
+
+    def test_webhook_verification_requires_matching_token(self):
+        old_token = customer_agent.META_VERIFY_TOKEN
+        customer_agent.META_VERIFY_TOKEN = "verify-secret"
+        try:
+            client = customer_agent.app.test_client()
+            rejected = client.get(
+                "/messenger?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=123"
+            )
+            accepted = client.get(
+                "/messenger?hub.mode=subscribe&hub.verify_token=verify-secret&hub.challenge=123"
+            )
+        finally:
+            customer_agent.META_VERIFY_TOKEN = old_token
+
+        self.assertEqual(rejected.status_code, 403)
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(accepted.get_data(as_text=True), "123")
+
+    def test_post_rejects_invalid_signature(self):
+        old_secret = customer_agent.META_APP_SECRET
+        customer_agent.META_APP_SECRET = "app-secret"
+        try:
+            response = customer_agent.app.test_client().post(
+                "/messenger",
+                json={"object": "page", "entry": []},
+                headers={"X-Hub-Signature-256": "sha256=wrong"},
+            )
+        finally:
+            customer_agent.META_APP_SECRET = old_secret
+
+        self.assertEqual(response.status_code, 403)
 
 
 if __name__ == "__main__":
