@@ -87,8 +87,8 @@ X-Admin-Key: <ADMIN_API_KEY>
 
 Endpoints:
 
-- `GET /admin/orders?limit=50`
-- `GET /admin/orders?status=new&limit=50`
+- `GET /admin/orders?limit=50&offset=0`
+- `GET /admin/orders?status=new&limit=50&offset=0`
 - `GET /admin/stats`
 - `PATCH /admin/orders/<id>/status`
 - `POST /admin/setup-webhook`
@@ -104,6 +104,8 @@ Allowed order statuses:
 
 The orders endpoint accepts integer limits from 1 to 200. Invalid limits or status
 filters return a structured `400` response instead of an internal server error.
+It also accepts an integer `offset` from 0 to 1,000,000 and returns pagination
+metadata containing `limit`, `offset`, `total`, and `has_more`.
 
 ## Health endpoints
 

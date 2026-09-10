@@ -422,6 +422,14 @@ def parse_order_limit(value, default=50, maximum=200):
     return min(max(parsed, 1), maximum)
 
 
+def parse_order_offset(value, default=0, maximum=1_000_000):
+    try:
+        parsed = int(default if value is None else value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if 0 <= parsed <= maximum else None
+
+
 def product_list_text():
     lines = []
     for name, data in PRODUCTS.items():
@@ -830,15 +838,39 @@ def admin_orders():
             "minimum": 1,
             "maximum": 200,
         }), 400
+    offset = parse_order_offset(request.args.get("offset"))
+    if offset is None:
+        return jsonify({
+            "ok": False,
+            "error": "offset must be an integer between 0 and 1000000",
+            "minimum": 0,
+            "maximum": 1_000_000,
+        }), 400
     conn = db_connect()
     if status:
+        total = conn.execute(
+            "SELECT COUNT(*) AS c FROM orders WHERE status=?", (status,)
+        ).fetchone()["c"]
         rows = conn.execute(
-            "SELECT * FROM orders WHERE status=? ORDER BY id DESC LIMIT ?", (status, limit)
+            "SELECT * FROM orders WHERE status=? ORDER BY id DESC LIMIT ? OFFSET ?",
+            (status, limit, offset),
         ).fetchall()
     else:
-        rows = conn.execute("SELECT * FROM orders ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        total = conn.execute("SELECT COUNT(*) AS c FROM orders").fetchone()["c"]
+        rows = conn.execute(
+            "SELECT * FROM orders ORDER BY id DESC LIMIT ? OFFSET ?", (limit, offset)
+        ).fetchall()
     conn.close()
-    return jsonify({"ok": True, "orders": [dict(row) for row in rows]})
+    return jsonify({
+        "ok": True,
+        "orders": [dict(row) for row in rows],
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "total": total,
+            "has_more": offset + len(rows) < total,
+        },
+    })
 
 
 @app.get("/admin/stats")

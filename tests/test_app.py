@@ -159,6 +159,42 @@ class CustomerAgentTests(unittest.TestCase):
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["error"], "invalid status")
 
+    def test_admin_orders_rejects_invalid_offset(self):
+        for offset in ("next", "-1", "1000001"):
+            with self.subTest(offset=offset):
+                response = self.client.get(
+                    f"/admin/orders?offset={offset}",
+                    headers={"X-Admin-Key": "test-admin-key"},
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertFalse(response.get_json()["ok"])
+
+    def test_admin_orders_returns_pagination_metadata(self):
+        for chat_id, name, phone in (
+            (2101, "أحمد علي", "0933000001"),
+            (2102, "سارة حسن", "0933000002"),
+            (2103, "نور خالد", "0933000003"),
+        ):
+            customer_agent.handle_message(chat_id, "بدي اشتري الجهاز")
+            customer_agent.handle_message(chat_id, f"اسمي {name}")
+            customer_agent.handle_message(chat_id, phone)
+            customer_agent.handle_message(chat_id, "دمشق")
+
+        response = self.client.get(
+            "/admin/orders?limit=1&offset=1",
+            headers={"X-Admin-Key": "test-admin-key"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(len(payload["orders"]), 1)
+        self.assertEqual(payload["pagination"], {
+            "limit": 1,
+            "offset": 1,
+            "total": 3,
+            "has_more": True,
+        })
+
     def test_telegram_webhook_rejects_wrong_secret(self):
         response = self.client.post(
             "/telegram",
