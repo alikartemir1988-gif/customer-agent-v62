@@ -1,4 +1,5 @@
 import json
+import hmac
 import os
 import re
 import sqlite3
@@ -506,7 +507,8 @@ def register_webhook():
 def webhook_authorized():
     if not WEBHOOK_SECRET:
         return True
-    return request.headers.get("X-Telegram-Bot-Api-Secret-Token", "") == WEBHOOK_SECRET
+    provided = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    return hmac.compare_digest(provided, WEBHOOK_SECRET)
 
 
 # =========================================================
@@ -519,7 +521,7 @@ def admin_required(fn):
         if not ADMIN_API_KEY:
             return jsonify({"ok": False, "error": "ADMIN_API_KEY is not configured"}), 503
         provided = request.headers.get("X-Admin-Key", "")
-        if provided != ADMIN_API_KEY:
+        if not hmac.compare_digest(provided, ADMIN_API_KEY):
             return jsonify({"ok": False, "error": "unauthorized"}), 401
         return fn(*args, **kwargs)
     return wrapped

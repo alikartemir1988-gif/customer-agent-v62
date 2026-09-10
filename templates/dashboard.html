@@ -8,7 +8,7 @@ body{font-family:system-ui;margin:0;background:#f5f7fb;color:#172033}.wrap{max-w
 </style>
 </head>
 <body><main class="wrap">
-<div class="top"><div><h1>لوحة إدارة العملاء والمبيعات</h1><div class="muted">نظرة تشغيلية مباشرة على الطلبات</div></div><form method="post" action="{{ url_for('logout') }}"><button class="logout">تسجيل الخروج</button></form></div>
+<div class="top"><div><h1>لوحة إدارة العملاء والمبيعات</h1><div class="muted">نظرة تشغيلية مباشرة على الطلبات</div></div><form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="logout">تسجيل الخروج</button></form></div>
 <section class="cards">
 <div class="card"><div class="muted">كل الطلبات</div><div class="value">{{ total_orders }}</div></div>
 <div class="card"><div class="muted">طلبات نشطة</div><div class="value">{{ active_orders }}</div></div>
@@ -17,6 +17,6 @@ body{font-family:system-ui;margin:0;background:#f5f7fb;color:#172033}.wrap{max-w
 </section>
 <section class="tablebox"><div class="filters"><a class="{{ 'active' if not status_filter else '' }}" href="{{ url_for('dashboard') }}">الكل</a>{% for s in allowed_statuses %}<a class="{{ 'active' if status_filter == s else '' }}" href="{{ url_for('dashboard', status=s) }}">{{ s }}</a>{% endfor %}</div>
 <div class="scroll"><table><thead><tr><th>#</th><th>العميل</th><th>الهاتف</th><th>المنتج</th><th>الكمية</th><th>الإجمالي</th><th>المدينة</th><th>الحالة</th><th>التاريخ</th></tr></thead><tbody>
-{% for o in orders %}<tr><td>{{ o.id }}</td><td>{{ o.customer_name }}</td><td>{{ o.customer_phone }}</td><td>{{ o.product_name }}</td><td>{{ o.quantity }}</td><td>{{ o.total_price }} {{ o.currency }}</td><td>{{ o.city }}</td><td><form method="post" action="{{ url_for('change_order_status', order_id=o.id) }}"><select name="status" onchange="this.form.submit()">{% for s in allowed_statuses %}<option value="{{ s }}" {{ 'selected' if o.status == s else '' }}>{{ s }}</option>{% endfor %}</select></form></td><td>{{ o.created_at }}</td></tr>{% else %}<tr><td colspan="9" class="empty">لا توجد طلبات ضمن هذا الفلتر.</td></tr>{% endfor %}
+{% for o in orders %}<tr><td>{{ o.id }}</td><td>{{ o.customer_name }}</td><td>{{ o.customer_phone }}</td><td>{{ o.product_name }}</td><td>{{ o.quantity }}</td><td>{{ o.total_price }} {{ o.currency }}</td><td>{{ o.city }}</td><td><form method="post" action="{{ url_for('change_order_status', order_id=o.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><select name="status" onchange="this.form.submit()">{% for s in allowed_statuses %}<option value="{{ s }}" {{ 'selected' if o.status == s else '' }}>{{ s }}</option>{% endfor %}</select></form></td><td>{{ o.created_at }}</td></tr>{% else %}<tr><td colspan="9" class="empty">لا توجد طلبات ضمن هذا الفلتر.</td></tr>{% endfor %}
 </tbody></table></div></section>
 </main></body></html>

@@ -24,6 +24,7 @@ This repository is the deployable backend for a customizable customer-sales agen
 - `WEBHOOK_URL` — public HTTPS base URL of the deployed service.
 - `ADMIN_API_KEY` — long random secret protecting admin endpoints.
 - `WEBHOOK_SECRET` — long random secret used to verify Telegram webhook requests.
+- `DASHBOARD_SESSION_SECRET` — independent long random secret used to sign dashboard sessions.
 
 ## Optional environment variables
 
@@ -105,6 +106,8 @@ Allowed order statuses:
 
 - Never commit Telegram tokens, admin keys, wallet addresses intended to stay private, passwords or exchange credentials.
 - Use long random values for `ADMIN_API_KEY` and `WEBHOOK_SECRET`.
+- Use a separate long random value for `DASHBOARD_SESSION_SECRET`; if omitted, the dashboard derives a stable fallback from `ADMIN_API_KEY`.
+- Dashboard state-changing forms are protected against cross-site request forgery (CSRF), and dashboard responses are marked non-cacheable.
 - Rotate secrets after sharing them in insecure channels.
 - Keep customer phone/order data private and restrict admin API access.
 - For larger deployments, add HTTPS termination, managed PostgreSQL, rate limiting, backups, centralized logs and monitoring.
