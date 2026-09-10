@@ -32,12 +32,16 @@ DEFAULT_PRODUCTS = {
         "currency": "$",
         "available": True,
         "aliases": ["الجهاز", "جهاز", "أجهزة", "اجهزة", "الأجهزة", "الاجهزة"],
+        "colors": ["أسود", "أبيض"],
+        "payment_methods": ["الدفع عند الاستلام"],
     },
     "منتج تجريبي": {
         "price": 30.0,
         "currency": "$",
         "available": True,
         "aliases": ["منتج تجريبي", "التجريبي"],
+        "colors": ["أسود"],
+        "payment_methods": ["الدفع عند الاستلام"],
     },
 }
 
@@ -288,11 +292,29 @@ def is_product_count_question(text):
 
 
 def is_price_question(text):
-    return contains_any(text, ["سعر", "بكم", "قديش", "كم حق", "شو حق", "حقه", "ثمن"])
+    return contains_any(text, [
+        "سعر", "بكم", "قديش السعر", "قديش سعر", "قديش حق", "كم حق",
+        "شو حق", "حقه", "ثمن",
+    ])
 
 
 def is_delivery_question(text):
     return contains_any(text, ["توصيل", "شحن", "يوصل", "التوصيل", "مدة التوصيل"])
+
+
+def is_color_question(text):
+    return contains_any(text, [
+        "كم لون", "عدد الالوان", "ما هو اللون", "ماهي الالوان", "ما هي الالوان",
+        "شو اللون", "شو الالوان", "لون الجهاز", "لون المنتج", "اللون المتوفر",
+        "الوان", "ألوان",
+    ])
+
+
+def is_payment_question(text):
+    return contains_any(text, [
+        "طرق الدفع", "طريقه الدفع", "طريقة الدفع", "كيف الدفع", "كيف ادفع",
+        "كيف أدفع", "وسائل الدفع", "خيارات الدفع", "دفع عند الاستلام",
+    ])
 
 
 def money(value):
@@ -314,6 +336,102 @@ def product_list_text():
         status = "متوفر" if data.get("available", True) else "غير متوفر"
         lines.append(f"• {name}: {money(data['price'])}{data['currency']} — {status}")
     return "المنتجات المتوفرة حالياً:\n" + "\n".join(lines)
+
+
+def configured_list(data, key):
+    values = data.get(key, [])
+    if isinstance(values, str):
+        values = [values]
+    if not isinstance(values, list):
+        return []
+    return [str(value).strip() for value in values if str(value).strip()]
+
+
+def selected_product(state, detected_product):
+    if detected_product:
+        return detected_product
+    name = state.get("product")
+    if name in PRODUCTS:
+        return name, PRODUCTS[name]
+    return None
+
+
+def product_color_text(name, data):
+    colors = configured_list(data, "colors")
+    if not colors:
+        return f"ألوان {name} غير محددة حالياً؛ خبرني إذا بدك أتأكد من المتجر."
+    return f"عدد ألوان {name}: {len(colors)}\nالألوان المتوفرة: {'، '.join(colors)}"
+
+
+def catalog_colors_text():
+    lines = []
+    for name, data in PRODUCTS.items():
+        if not data.get("available", True):
+            continue
+        colors = configured_list(data, "colors")
+        if colors:
+            lines.append(f"• {name}: {len(colors)} — {'، '.join(colors)}")
+    if not lines:
+        return "الألوان غير محددة حالياً؛ لأي منتج بدك أتأكد؟"
+    return "الألوان المتوفرة حسب المنتج:\n" + "\n".join(lines)
+
+
+def payment_methods_text(product=None):
+    products = [product] if product else [
+        (name, data) for name, data in PRODUCTS.items() if data.get("available", True)
+    ]
+    methods = []
+    for _, data in products:
+        for method in configured_list(data, "payment_methods"):
+            if method not in methods:
+                methods.append(method)
+    if not methods:
+        return "طرق الدفع غير محددة حالياً؛ خبرني إذا بدك أتأكد من المتجر."
+    prefix = f"طرق الدفع المتاحة للمنتج {product[0]}" if product else "طرق الدفع المتاحة"
+    return prefix + ":\n" + "\n".join(f"• {method}" for method in methods)
+
+
+def informational_answers(text, state, detected_product, city):
+    answers = []
+    product = selected_product(state, detected_product)
+
+    if is_product_count_question(text):
+        available = [data for data in PRODUCTS.values() if data.get("available", True)]
+        answers.append(
+            f"عندنا حالياً {len(available)} منتج/نوع متوفر.\n\n{product_list_text()}"
+        )
+    elif is_products_question(text):
+        answers.append(
+            product_list_text() + "\n\nإذا بدك واحد منهم، قلي مثلاً: بدي أطلب الجهاز."
+        )
+
+    if is_price_question(text):
+        if product:
+            name, data = product
+            answers.append(f"سعر {name} هو {money(data['price'])}{data['currency']} ✅")
+        else:
+            answers.append(
+                "أكيد 👍 لأي منتج بدك السعر؟\n" +
+                "\n".join(f"• {name}" for name in PRODUCTS)
+            )
+
+    if is_delivery_question(text):
+        if city:
+            answers.append(f"التوصيل إلى {city}: {DELIVERY.get(city, '2-4 أيام')} 🚚")
+        else:
+            answers.append("أكيد 🚚 لأي مدينة بدك تعرف مدة التوصيل؟")
+
+    if is_color_question(text):
+        answers.append(product_color_text(*product) if product else catalog_colors_text())
+
+    if is_payment_question(text):
+        answers.append(payment_methods_text(product))
+
+    return answers
+
+
+def combine_answers(answers, next_message):
+    return "\n\n".join([*answers, next_message]) if answers else next_message
 
 
 # =========================================================
@@ -394,32 +512,17 @@ def handle_message(chat_id, text):
         reset(chat_id)
         return "✅ تمام، لغيت المحادثة الحالية. فيك تبدأ من جديد."
 
+    buy_intent = is_buy_intent(text)
+    answers = informational_answers(text, state, product, city)
+    if not buy_intent:
+        if answers:
+            save_session(chat_id, state)
+            return "\n\n".join(answers)
+
     if contains_any(text, ["مرحبا", "اهلا", "أهلا", "هلا", "السلام عليكم", "هاي", "hello", "hi"]):
-        if not state["buying"]:
+        if not state["buying"] and not buy_intent:
             save_session(chat_id, state)
             return "أهلاً وسهلاً 👋\nفيني أعرض المنتجات والأسعار، أخبرك عن التوصيل، أو أسجّل لك طلب مباشرة."
-
-    if is_product_count_question(text):
-        available = [p for p in PRODUCTS.values() if p.get("available", True)]
-        save_session(chat_id, state)
-        return f"عندنا حالياً {len(available)} منتج/نوع متوفر.\n\n{product_list_text()}"
-
-    if is_products_question(text):
-        save_session(chat_id, state)
-        return product_list_text() + "\n\nإذا بدك واحد منهم، قلي مثلاً: بدي أطلب الجهاز."
-
-    if is_price_question(text) and not is_buy_intent(text):
-        save_session(chat_id, state)
-        if product:
-            data = product[1]
-            return f"سعر {product[0]} هو {money(data['price'])}{data['currency']} ✅"
-        return "أكيد 👍 لأي منتج بدك السعر؟\n" + "\n".join(f"• {name}" for name in PRODUCTS)
-
-    if is_delivery_question(text) and not is_buy_intent(text):
-        save_session(chat_id, state)
-        if city:
-            return f"التوصيل إلى {city}: {DELIVERY.get(city, '2-4 أيام')} 🚚"
-        return "أكيد 🚚 لأي مدينة بدك تعرف مدة التوصيل؟"
 
     if n in {"المنتج", "منتج", "الجهاز", "جهاز"} and not state["buying"]:
         save_session(chat_id, state)
@@ -428,7 +531,7 @@ def handle_message(chat_id, text):
             return f"{product[0]} متوفر ✅ وسعره {money(data['price'])}{data['currency']}.\nإذا بدك تطلبه قلي: بدي أطلبه."
         return product_list_text()
 
-    if is_buy_intent(text):
+    if buy_intent:
         state["buying"] = True
         state["done"] = False
         state["qty"] = detect_quantity(text)
@@ -442,20 +545,27 @@ def handle_message(chat_id, text):
                 state["product"] = available_names[0]
             else:
                 save_session(chat_id, state)
-                return "تمام 👍 شو المنتج اللي بدك تطلبه؟\n" + "\n".join(f"• {name}" for name in available_names)
+                return combine_answers(
+                    answers,
+                    "تمام 👍 شو المنتج اللي بدك تطلبه؟\n" +
+                    "\n".join(f"• {name}" for name in available_names),
+                )
 
         if not state["name"]:
             save_session(chat_id, state)
-            return "تمام 👍 شو اسمك حتى أسجل الطلب؟"
+            return combine_answers(answers, "تمام 👍 شو اسمك حتى أسجل الطلب؟")
         if not state["phone"]:
             save_session(chat_id, state)
-            return f"تمام {state['name']} 👍 ابعتلي رقم الهاتف."
+            return combine_answers(answers, f"تمام {state['name']} 👍 ابعتلي رقم الهاتف.")
         if not state["city"]:
             save_session(chat_id, state)
-            return "ممتاز 👍 بقي بس أعرف المدينة للتوصيل."
+            return combine_answers(answers, "ممتاز 👍 بقي بس أعرف المدينة للتوصيل.")
         if state["done"]:
             save_session(chat_id, state)
-            return f"طلبك مسجل مسبقاً ✅ رقم الطلب: {state['order_id']}"
+            return combine_answers(
+                answers,
+                f"طلبك مسجل مسبقاً ✅ رقم الطلب: {state['order_id']}",
+            )
 
         order_id = create_order(chat_id, state, text)
         state["done"] = True
@@ -464,7 +574,7 @@ def handle_message(chat_id, text):
 
         data = PRODUCTS[state["product"]]
         total = float(data["price"]) * int(state["qty"])
-        return (
+        confirmation = (
             "✅ تم تسجيل طلبك بنجاح\n\n"
             f"رقم الطلب: {order_id}\n"
             f"الاسم: {state['name']}\n"
@@ -474,6 +584,7 @@ def handle_message(chat_id, text):
             f"المدينة: {state['city']}\n"
             f"التوصيل: {DELIVERY.get(state['city'], '2-4 أيام')}"
         )
+        return combine_answers(answers, confirmation)
 
     save_session(chat_id, state)
     return (

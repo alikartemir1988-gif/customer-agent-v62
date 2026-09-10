@@ -92,6 +92,65 @@ class CustomerAgentTests(unittest.TestCase):
         logged = " ".join(str(arg) for call in print_mock.call_args_list for arg in call.args)
         self.assertNotIn(secret_token, logged)
 
+    def test_color_count_question_is_understood(self):
+        response = customer_agent.handle_message(7001, "كم لون")
+
+        self.assertIn("الألوان المتوفرة", response)
+        self.assertIn("أسود", response)
+        self.assertNotIn("فهمت عليك جزئياً", response)
+
+    def test_combined_color_and_payment_question_answers_both(self):
+        response = customer_agent.handle_message(
+            7002,
+            "ما هو لون الجهاز وما هي طرق الدفع",
+        )
+
+        self.assertIn("ألوان الجهاز", response)
+        self.assertIn("أسود", response)
+        self.assertIn("أبيض", response)
+        self.assertIn("طرق الدفع", response)
+        self.assertIn("الدفع عند الاستلام", response)
+        self.assertNotIn("فهمت عليك جزئياً", response)
+
+    def test_combined_price_and_delivery_question_answers_both(self):
+        response = customer_agent.handle_message(
+            7003,
+            "كم سعر الجهاز ومدة التوصيل إلى دمشق؟",
+        )
+
+        self.assertIn("30$", response)
+        self.assertIn("التوصيل إلى دمشق", response)
+        self.assertIn("3-5 أيام", response)
+        self.assertNotIn("فهمت عليك جزئياً", response)
+
+    def test_known_intent_does_not_fall_back_for_unknown_tail(self):
+        response = customer_agent.handle_message(
+            7004,
+            "ما هو لون الجهاز وعندي سؤال ثاني غير واضح",
+        )
+
+        self.assertIn("ألوان الجهاز", response)
+        self.assertNotIn("فهمت عليك جزئياً", response)
+
+    def test_purchase_message_can_include_information_questions(self):
+        response = customer_agent.handle_message(
+            7005,
+            "مرحبا، بدي اشتري الجهاز، كم سعره وما هي طرق الدفع؟",
+        )
+
+        self.assertIn("30$", response)
+        self.assertIn("الدفع عند الاستلام", response)
+        self.assertIn("شو اسمك", response)
+        self.assertNotIn("فهمت عليك جزئياً", response)
+
+    def test_single_price_and_delivery_questions_still_work(self):
+        price = customer_agent.handle_message(7006, "كم سعر الجهاز؟")
+        delivery = customer_agent.handle_message(7007, "التوصيل إلى حمص؟")
+
+        self.assertIn("30$", price)
+        self.assertIn("التوصيل إلى حمص", delivery)
+        self.assertIn("2-4 أيام", delivery)
+
     def test_order_flow_persists_one_order_and_blocks_duplicate(self):
         chat_id = 9001
 
