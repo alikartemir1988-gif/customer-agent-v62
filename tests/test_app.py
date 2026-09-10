@@ -78,6 +78,52 @@ class CustomerAgentTests(unittest.TestCase):
         finally:
             customer_agent.CONFIGURATION_ERRORS[:] = errors_before
 
+    def test_invalid_product_schema_uses_safe_fallback(self):
+        errors_before = list(customer_agent.CONFIGURATION_ERRORS)
+        customer_agent.CONFIGURATION_ERRORS.clear()
+
+        try:
+            with mock.patch.dict(
+                os.environ,
+                {"PRODUCTS_JSON": '{"Broken":{"currency":"$"}}'},
+            ):
+                loaded = customer_agent._json_env(
+                    "PRODUCTS_JSON",
+                    customer_agent.DEFAULT_PRODUCTS,
+                    customer_agent._valid_products,
+                )
+
+            self.assertIs(loaded, customer_agent.DEFAULT_PRODUCTS)
+            self.assertEqual(
+                customer_agent.CONFIGURATION_ERRORS,
+                ["PRODUCTS_JSON has an invalid schema"],
+            )
+        finally:
+            customer_agent.CONFIGURATION_ERRORS[:] = errors_before
+
+    def test_invalid_delivery_schema_uses_safe_fallback(self):
+        errors_before = list(customer_agent.CONFIGURATION_ERRORS)
+        customer_agent.CONFIGURATION_ERRORS.clear()
+
+        try:
+            with mock.patch.dict(
+                os.environ,
+                {"DELIVERY_JSON": '{"دمشق":3}'},
+            ):
+                loaded = customer_agent._json_env(
+                    "DELIVERY_JSON",
+                    customer_agent.DEFAULT_DELIVERY,
+                    customer_agent._valid_delivery,
+                )
+
+            self.assertIs(loaded, customer_agent.DEFAULT_DELIVERY)
+            self.assertEqual(
+                customer_agent.CONFIGURATION_ERRORS,
+                ["DELIVERY_JSON has an invalid schema"],
+            )
+        finally:
+            customer_agent.CONFIGURATION_ERRORS[:] = errors_before
+
     def test_admin_api_rejects_missing_key(self):
         response = self.client.get("/admin/stats")
         self.assertEqual(response.status_code, 401)

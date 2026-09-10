@@ -112,8 +112,11 @@ filters return a structured `400` response instead of an internal server error.
 - `GET /webhook-info`
 
 `/health` returns `503` with named configuration errors when `PRODUCTS_JSON` or
-`DELIVERY_JSON` is malformed, while never echoing the configured value. This lets
-deployment health checks stop a release that would otherwise use fallback catalog data.
+`DELIVERY_JSON` is malformed or has an invalid schema, while never echoing the
+configured value. Product entries require a non-negative numeric `price` and a
+non-empty `currency`; optional aliases, colors and payment methods are type-checked.
+Delivery entries require non-empty text keys and values. This lets deployment health
+checks stop a release that would otherwise use fallback catalog data.
 
 ## Security
 

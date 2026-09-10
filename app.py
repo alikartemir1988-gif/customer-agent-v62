@@ -1,5 +1,6 @@
 import json
 import hmac
+import math
 import os
 import re
 import sqlite3
@@ -79,7 +80,50 @@ CITIES = [
 CONFIGURATION_ERRORS = []
 
 
-def _json_env(name, default):
+def _valid_text_list(value, allow_text=False):
+    if allow_text and isinstance(value, str):
+        return bool(value.strip())
+    return (
+        isinstance(value, list)
+        and all(isinstance(item, str) and item.strip() for item in value)
+    )
+
+
+def _valid_products(value):
+    for name, data in value.items():
+        if not isinstance(name, str) or not name.strip() or not isinstance(data, dict):
+            return False
+        price = data.get("price")
+        if (
+            isinstance(price, bool)
+            or not isinstance(price, (int, float))
+            or not math.isfinite(float(price))
+            or price < 0
+        ):
+            return False
+        if not isinstance(data.get("currency"), str) or not data["currency"].strip():
+            return False
+        if "available" in data and not isinstance(data["available"], bool):
+            return False
+        if "aliases" in data and not _valid_text_list(data["aliases"]):
+            return False
+        for key in ("colors", "payment_methods"):
+            if key in data and not _valid_text_list(data[key], allow_text=True):
+                return False
+    return True
+
+
+def _valid_delivery(value):
+    return all(
+        isinstance(city, str)
+        and city.strip()
+        and isinstance(duration, str)
+        and duration.strip()
+        for city, duration in value.items()
+    )
+
+
+def _json_env(name, default, validator=None):
     raw = os.environ.get(name, "").strip()
     if not raw:
         return default
@@ -94,11 +138,14 @@ def _json_env(name, default):
     if not value:
         CONFIGURATION_ERRORS.append(f"{name} must not be empty")
         return default
+    if validator and not validator(value):
+        CONFIGURATION_ERRORS.append(f"{name} has an invalid schema")
+        return default
     return value
 
 
-PRODUCTS = _json_env("PRODUCTS_JSON", DEFAULT_PRODUCTS)
-DELIVERY = _json_env("DELIVERY_JSON", DEFAULT_DELIVERY)
+PRODUCTS = _json_env("PRODUCTS_JSON", DEFAULT_PRODUCTS, _valid_products)
+DELIVERY = _json_env("DELIVERY_JSON", DEFAULT_DELIVERY, _valid_delivery)
 
 
 # =========================================================
