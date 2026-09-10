@@ -42,6 +42,10 @@ def csrf_valid():
     return bool(expected and hmac.compare_digest(expected, provided))
 
 
+def escape_like(value):
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 @dashboard_app.after_request
 def secure_dashboard_response(response):
     response.headers["Cache-Control"] = "no-store"
@@ -100,17 +104,28 @@ def dashboard():
     status_filter = request.args.get("status", "").strip().lower()
     if status_filter and status_filter not in ORDER_STATUSES:
         status_filter = ""
+    search_query = request.args.get("q", "").strip()[:100]
+
+    clauses = []
+    params = []
+    if status_filter:
+        clauses.append("status=?")
+        params.append(status_filter)
+    if search_query:
+        pattern = f"%{escape_like(search_query)}%"
+        clauses.append(
+            "(CAST(id AS TEXT)=? OR customer_name LIKE ? ESCAPE '\\' "
+            "OR customer_phone LIKE ? ESCAPE '\\' OR product_name LIKE ? ESCAPE '\\' "
+            "OR city LIKE ? ESCAPE '\\')"
+        )
+        params.extend([search_query, pattern, pattern, pattern, pattern])
 
     conn = db_connect()
-    if status_filter:
-        orders = conn.execute(
-            "SELECT * FROM orders WHERE status=? ORDER BY id DESC LIMIT 200",
-            (status_filter,),
-        ).fetchall()
-    else:
-        orders = conn.execute(
-            "SELECT * FROM orders ORDER BY id DESC LIMIT 200"
-        ).fetchall()
+    where_sql = " WHERE " + " AND ".join(clauses) if clauses else ""
+    orders = conn.execute(
+        "SELECT * FROM orders" + where_sql + " ORDER BY id DESC LIMIT 200",
+        params,
+    ).fetchall()
 
     total_orders = conn.execute("SELECT COUNT(*) AS c FROM orders").fetchone()["c"]
     active_orders = conn.execute(
@@ -128,6 +143,7 @@ def dashboard():
         "dashboard.html",
         orders=[dict(row) for row in orders],
         status_filter=status_filter,
+        search_query=search_query,
         allowed_statuses=sorted(ORDER_STATUSES),
         total_orders=total_orders,
         active_orders=active_orders,

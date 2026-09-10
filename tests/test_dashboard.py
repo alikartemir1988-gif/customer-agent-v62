@@ -34,7 +34,7 @@ class DashboardSecurityTests(unittest.TestCase):
             data={"password": "test-admin-key", "csrf_token": self.csrf_token()},
         )
 
-    def create_order(self):
+    def create_order(self, name="عميل", phone="+963900000000", city="دمشق"):
         now = customer_agent.utc_now()
         conn = customer_agent.db_connect()
         cursor = conn.execute(
@@ -46,8 +46,8 @@ class DashboardSecurityTests(unittest.TestCase):
             ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
-                "1", "عميل", "+963900000000", "الجهاز", 1, 30, 30, "$",
-                "سوريا", "دمشق", "new", "test", now, now,
+                phone, name, phone, "الجهاز", 1, 30, 30, "$",
+                "سوريا", city, "new", "test", now, now,
             ),
         )
         conn.commit()
@@ -91,6 +91,29 @@ class DashboardSecurityTests(unittest.TestCase):
         ).fetchone()["status"]
         conn.close()
         self.assertEqual(status, "confirmed")
+
+    def test_dashboard_search_finds_customer_and_preserves_status_filter(self):
+        self.create_order(name="أحمد المميز", phone="0933111111")
+        self.create_order(name="سارة", phone="0944222222")
+        self.login()
+
+        response = self.client.get("/?q=0933111111&status=new")
+        page = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("أحمد المميز", page)
+        self.assertNotIn("سارة", page)
+        self.assertIn('value="0933111111"', page)
+        self.assertIn('name="status" value="new"', page)
+
+    def test_dashboard_search_treats_wildcards_as_text(self):
+        self.create_order(name="أحمد")
+        self.login()
+
+        response = self.client.get("/?q=%25")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("لا توجد طلبات ضمن هذا الفلتر", response.get_data(as_text=True))
 
 
 if __name__ == "__main__":
