@@ -76,6 +76,43 @@ class OrderFlowTests(unittest.TestCase):
         )
         self.assertEqual(self.order_count(), 1)
 
+    def test_purchase_intent_accepts_quantity_before_plural_product(self):
+        chat_id = 110
+
+        started = customer_agent.handle_message(
+            chat_id,
+            "بدي 4 أجهزة",
+        )
+
+        self.assertIn("شو اسمك", started)
+        state = customer_agent.session(chat_id)
+        self.assertTrue(state["buying"])
+        self.assertEqual(state["product"], "الجهاز")
+        self.assertEqual(state["qty"], 4)
+
+        customer_agent.handle_message(chat_id, "خالد أحمد")
+        customer_agent.handle_message(chat_id, "0933123456")
+        review = customer_agent.handle_message(chat_id, "دمشق")
+
+        self.assertIn("الكمية: 4", review)
+        self.assertIn("الإجمالي: 120$", review)
+        self.assertEqual(self.order_count(), 0)
+
+        confirmed = customer_agent.handle_message(chat_id, "تأكيد")
+
+        self.assertIn("تم تسجيل طلبك", confirmed)
+        self.assertEqual(self.order_count(), 1)
+
+    def test_purchase_intent_accepts_arabic_quantity_word(self):
+        reply = customer_agent.handle_message(
+            111,
+            "بدي أربع أجهزة",
+        )
+
+        self.assertIn("شو اسمك", reply)
+        self.assertEqual(customer_agent.session(111)["qty"], 4)
+        self.assertNotIn("فهمت عليك جزئياً", reply)
+
     def test_customer_can_edit_before_confirmation(self):
         chat_id = 102
 
@@ -182,6 +219,59 @@ class OrderFlowTests(unittest.TestCase):
 
         self.assertIn("لغيت", cancelled)
         self.assertEqual(self.order_count(), 0)
+
+    def test_standalone_cancel_word_cancels_pending_order(self):
+        chat_id = 112
+
+        for message in (
+            "بدي الجهاز",
+            "بيكار أحمد",
+            "098556858",
+            "دمشق",
+        ):
+            customer_agent.handle_message(chat_id, message)
+
+        cancelled = customer_agent.handle_message(chat_id, "إلغاء")
+
+        self.assertIn("لغيت المحادثة الحالية", cancelled)
+        self.assertEqual(self.order_count(), 0)
+        self.assertFalse(customer_agent.session(chat_id)["buying"])
+
+    def test_colloquial_payment_questions_are_understood(self):
+        for index, question in enumerate(
+            (
+                "كيف فيني ادفع",
+                "متى لازم ادفع",
+                "شلون ادفع",
+            ),
+            start=113,
+        ):
+            with self.subTest(question=question):
+                reply = customer_agent.handle_message(index, question)
+                self.assertIn("طرق الدفع المتاحة", reply)
+                self.assertIn("الدفع عند الاستلام", reply)
+                self.assertNotIn("فهمت عليك جزئياً", reply)
+
+    def test_payment_question_during_confirmation_keeps_order(self):
+        chat_id = 116
+
+        for message in (
+            "بدي الجهاز",
+            "سارة أحمد",
+            "0933123456",
+            "دمشق",
+        ):
+            customer_agent.handle_message(chat_id, message)
+
+        reply = customer_agent.handle_message(chat_id, "متى لازم ادفع")
+
+        self.assertIn("الدفع عند الاستلام", reply)
+        self.assertIn("ما زال جاهزاً للتأكيد", reply)
+        self.assertEqual(self.order_count(), 0)
+
+        confirmed = customer_agent.handle_message(chat_id, "تأكيد")
+        self.assertIn("تم تسجيل طلبك", confirmed)
+        self.assertEqual(self.order_count(), 1)
 
     def test_order_progress_survives_memory_restart(self):
         chat_id = 105

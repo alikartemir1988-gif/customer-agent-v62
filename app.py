@@ -28,7 +28,7 @@ META_APP_SECRET = os.environ.get("META_APP_SECRET", "").strip()
 META_GRAPH_VERSION = os.environ.get("META_GRAPH_VERSION", "v23.0").strip()
 DB_PATH = os.environ.get("DB_PATH", "customer_agent.db").strip()
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
-APP_VERSION = "6.3.0"
+APP_VERSION = "6.3.1"
 GIT_COMMIT = os.environ.get("RENDER_GIT_COMMIT", "").strip()
 
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -754,6 +754,31 @@ def explicit_name(text):
 
 def is_buy_intent(text):
 
+    n = norm(text)
+
+    purchase_prefix = (
+        r"(?:بدي|بدنا|اريد|حابب|حابه|حاب)"
+    )
+    quantity = (
+        r"(?:\d+|واحد|واحده|اثنين|اتنين|ثلاث|ثلاثه|اربع|اربعه|خمس|خمسه)"
+    )
+
+    for name, data in PRODUCTS.items():
+
+        aliases = {
+            norm(name),
+            *(norm(alias) for alias in data.get("aliases", [])),
+        }
+
+        for alias in aliases:
+
+            if alias and re.search(
+                rf"(?:^|\s){purchase_prefix}\s+(?:{quantity}\s+)?"
+                rf"{re.escape(alias)}(?:\s|$)",
+                n,
+            ):
+                return True
+
     return contains_any(
         text,
         [
@@ -885,6 +910,15 @@ def is_payment_question(text):
             "ماهي طرق الدفع",
             "كيف ادفع",
             "كيف أدفع",
+            "كيف فيني ادفع",
+            "كيف فيني أدفع",
+            "شلون ادفع",
+            "شلون أدفع",
+            "متى لازم ادفع",
+            "متى لازم أدفع",
+            "امتى ادفع",
+            "إمتى أدفع",
+            "وقت الدفع",
             "الدفع عند الاستلام",
         ],
     )
@@ -1291,15 +1325,18 @@ def _handle_message(
     # CANCEL / RESET
     # -----------------------------------------
 
-    if contains_any(
-        text,
-        [
-            "الغاء الطلب",
-            "إلغاء الطلب",
-            "الغي الطلب",
-            "ابدأ من جديد",
-            "بداية جديدة",
-        ],
+    if (
+        n in {"الغاء", "الغي"}
+        or contains_any(
+            text,
+            [
+                "الغاء الطلب",
+                "إلغاء الطلب",
+                "الغي الطلب",
+                "ابدأ من جديد",
+                "بداية جديدة",
+            ],
+        )
     ):
 
         reset(chat_id)
