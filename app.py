@@ -23,6 +23,7 @@ PORT = int(os.environ.get("PORT", "10000"))
 
 API = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
 app = Flask(__name__)
+TELEGRAM_REQUEST_ERROR = "telegram request failed"
 
 
 DEFAULT_PRODUCTS = {
@@ -497,6 +498,11 @@ def telegram_api(method, **data):
     return response.json()
 
 
+def log_external_failure(context, exc):
+    """Log only the exception class so request URLs cannot expose bot tokens."""
+    print(f"{context}: {type(exc).__name__}")
+
+
 def resolved_webhook_url():
     if not WEBHOOK_URL:
         return ""
@@ -567,7 +573,8 @@ def setup_webhook():
     try:
         return jsonify(register_webhook())
     except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 502
+        log_external_failure("Telegram webhook setup failed", exc)
+        return jsonify({"ok": False, "error": TELEGRAM_REQUEST_ERROR}), 502
 
 
 @app.get("/admin/orders")
@@ -653,7 +660,8 @@ def webhook_info():
             "last_error_message": result.get("last_error_message", ""),
         })
     except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 500
+        log_external_failure("Telegram webhook info failed", exc)
+        return jsonify({"ok": False, "error": TELEGRAM_REQUEST_ERROR}), 500
 
 
 @app.post("/telegram")
@@ -685,7 +693,7 @@ def telegram_webhook():
 
         telegram_api("sendMessage", chat_id=chat_id, text=answer)
     except Exception as exc:
-        print("Telegram update error:", repr(exc))
+        log_external_failure("Telegram update failed", exc)
         return jsonify({"ok": False, "error": "handled"}), 200
 
     return jsonify({"ok": True})

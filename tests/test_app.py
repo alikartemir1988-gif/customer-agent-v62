@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 
 _TEST_DIR = tempfile.TemporaryDirectory()
@@ -71,6 +72,25 @@ class CustomerAgentTests(unittest.TestCase):
             headers={"X-Telegram-Bot-Api-Secret-Token": "wrong"},
         )
         self.assertEqual(response.status_code, 401)
+
+    def test_webhook_info_does_not_expose_bot_token_on_failure(self):
+        secret_token = "secret-token-that-must-not-leak"
+        secret_api_url = f"https://api.telegram.org/bot{secret_token}"
+        failure = RuntimeError(f"request failed for {secret_api_url}/getWebhookInfo")
+
+        with (
+            mock.patch.object(customer_agent, "BOT_TOKEN", secret_token),
+            mock.patch.object(customer_agent, "API", secret_api_url),
+            mock.patch.object(customer_agent.requests, "get", side_effect=failure),
+            mock.patch("builtins.print") as print_mock,
+        ):
+            response = self.client.get("/webhook-info")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.get_json()["error"], "telegram request failed")
+        self.assertNotIn(secret_token, response.get_data(as_text=True))
+        logged = " ".join(str(arg) for call in print_mock.call_args_list for arg in call.args)
+        self.assertNotIn(secret_token, logged)
 
     def test_order_flow_persists_one_order_and_blocks_duplicate(self):
         chat_id = 9001

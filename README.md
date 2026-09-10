@@ -111,6 +111,7 @@ filters return a structured `400` response instead of an internal server error.
 - Use long random values for `ADMIN_API_KEY` and `WEBHOOK_SECRET`.
 - Use a separate long random value for `DASHBOARD_SESSION_SECRET`; if omitted, the dashboard derives a stable fallback from `ADMIN_API_KEY`.
 - Dashboard state-changing forms are protected against cross-site request forgery (CSRF), and dashboard responses are marked non-cacheable.
+- Telegram transport failures expose only sanitized errors so bot tokens cannot leak through request URLs or logs.
 - Rotate secrets after sharing them in insecure channels.
 - Keep customer phone/order data private and restrict admin API access.
 - For larger deployments, add HTTPS termination, managed PostgreSQL, rate limiting, backups, centralized logs and monitoring.
