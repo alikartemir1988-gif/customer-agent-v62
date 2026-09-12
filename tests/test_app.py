@@ -52,6 +52,71 @@ class CustomerAgentTests(unittest.TestCase):
             ["PRODUCTS_JSON must be valid JSON"],
         )
 
+    def test_readiness_rejects_missing_deployment_settings(self):
+        with (
+            mock.patch.object(customer_agent, "BOT_TOKEN", ""),
+            mock.patch.object(customer_agent, "WEBHOOK_URL", ""),
+            mock.patch.object(customer_agent, "ADMIN_API_KEY", ""),
+            mock.patch.object(customer_agent, "WEBHOOK_SECRET", ""),
+            mock.patch.object(customer_agent, "DASHBOARD_SESSION_SECRET", ""),
+        ):
+            response = self.client.get("/ready")
+
+        self.assertEqual(response.status_code, 503)
+        payload = response.get_json()
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["configuration"], "error")
+        self.assertEqual(
+            set(payload["configuration_errors"]),
+            {
+                "TELEGRAM_BOT_TOKEN is not configured",
+                "WEBHOOK_URL is not configured",
+                "ADMIN_API_KEY is not configured",
+                "WEBHOOK_SECRET is not configured",
+                "DASHBOARD_SESSION_SECRET is not configured",
+            },
+        )
+
+    def test_readiness_accepts_complete_https_configuration(self):
+        with (
+            mock.patch.object(customer_agent, "BOT_TOKEN", "configured-token"),
+            mock.patch.object(
+                customer_agent,
+                "WEBHOOK_URL",
+                "https://customer-agent.example.com",
+            ),
+            mock.patch.object(customer_agent, "ADMIN_API_KEY", "configured-admin-key"),
+            mock.patch.object(customer_agent, "WEBHOOK_SECRET", "configured-webhook-key"),
+            mock.patch.object(
+                customer_agent,
+                "DASHBOARD_SESSION_SECRET",
+                "configured-dashboard-key",
+            ),
+        ):
+            response = self.client.get("/ready")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["configuration_errors"], [])
+
+    def test_readiness_requires_https_webhook_without_exposing_url(self):
+        private_url = "http://private-host.example.com/telegram"
+        with (
+            mock.patch.object(customer_agent, "BOT_TOKEN", "configured-token"),
+            mock.patch.object(customer_agent, "WEBHOOK_URL", private_url),
+            mock.patch.object(customer_agent, "ADMIN_API_KEY", "configured-admin-key"),
+            mock.patch.object(customer_agent, "WEBHOOK_SECRET", "configured-webhook-key"),
+            mock.patch.object(
+                customer_agent,
+                "DASHBOARD_SESSION_SECRET",
+                "configured-dashboard-key",
+            ),
+        ):
+            response = self.client.get("/ready")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("WEBHOOK_URL must use HTTPS", response.get_json()["configuration_errors"])
+        self.assertNotIn(private_url, response.get_data(as_text=True))
+
     def test_invalid_json_configuration_falls_back_without_exposing_value(self):
         secret_value = '{"private":"must-not-appear"'
         errors_before = list(customer_agent.CONFIGURATION_ERRORS)

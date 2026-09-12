@@ -19,6 +19,7 @@ BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "").strip()
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "").strip()
 ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "").strip()
+DASHBOARD_SESSION_SECRET = os.environ.get("DASHBOARD_SESSION_SECRET", "").strip()
 DB_PATH = os.environ.get("DB_PATH", "customer_agent.db").strip()
 PORT = int(os.environ.get("PORT", "10000"))
 
@@ -886,15 +887,37 @@ def root():
     return jsonify({"name": "Customer Agent", "version": "7.0", "status": "ok"})
 
 
-@app.get("/health")
-def health():
+def database_available():
     try:
         conn = db_connect()
         conn.execute("SELECT 1").fetchone()
         conn.close()
-        db_ok = True
+        return True
     except Exception:
-        db_ok = False
+        return False
+
+
+def deployment_configuration_errors():
+    settings = {
+        "TELEGRAM_BOT_TOKEN": BOT_TOKEN,
+        "WEBHOOK_URL": WEBHOOK_URL,
+        "ADMIN_API_KEY": ADMIN_API_KEY,
+        "WEBHOOK_SECRET": WEBHOOK_SECRET,
+        "DASHBOARD_SESSION_SECRET": DASHBOARD_SESSION_SECRET,
+    }
+    errors = [
+        f"{name} is not configured"
+        for name, value in settings.items()
+        if not value
+    ]
+    if WEBHOOK_URL and not WEBHOOK_URL.lower().startswith("https://"):
+        errors.append("WEBHOOK_URL must use HTTPS")
+    return errors
+
+
+@app.get("/health")
+def health():
+    db_ok = database_available()
     config_ok = not CONFIGURATION_ERRORS
     healthy = db_ok and config_ok
     return jsonify({
@@ -905,6 +928,19 @@ def health():
         "telegram_configured": bool(BOT_TOKEN),
         "webhook_url_configured": bool(WEBHOOK_URL),
     }), 200 if healthy else 503
+
+
+@app.get("/ready")
+def ready():
+    db_ok = database_available()
+    errors = [*CONFIGURATION_ERRORS, *deployment_configuration_errors()]
+    ready_for_traffic = db_ok and not errors
+    return jsonify({
+        "ok": ready_for_traffic,
+        "database": "ok" if db_ok else "error",
+        "configuration": "ok" if not errors else "error",
+        "configuration_errors": errors,
+    }), 200 if ready_for_traffic else 503
 
 
 @app.post("/admin/setup-webhook")

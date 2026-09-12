@@ -78,7 +78,7 @@ gunicorn --bind 0.0.0.0:$PORT app:app
 4. Use persistent disk storage for `DB_PATH` if SQLite is used.
 5. Start the application with Gunicorn.
 6. POST `/admin/setup-webhook` with header `X-Admin-Key: <ADMIN_API_KEY>`.
-7. Check `/health` and `/webhook-info`.
+7. Check `/health`, `/ready` and `/webhook-info`.
 8. Send `/start` to the Telegram bot and test a complete order.
 
 ## Admin API
@@ -116,6 +116,7 @@ metadata containing `limit`, `offset`, `total`, and `has_more`.
 
 - `GET /`
 - `GET /health`
+- `GET /ready`
 - `GET /webhook-info`
 
 `/health` returns `503` with named configuration errors when `PRODUCTS_JSON` or
@@ -124,6 +125,12 @@ configured value. Product entries require a non-negative numeric `price` and a
 non-empty `currency`; optional aliases, colors and payment methods are type-checked.
 Delivery entries require non-empty text keys and values. This lets deployment health
 checks stop a release that would otherwise use fallback catalog data.
+
+`/ready` is the deployment readiness check. It additionally returns `503` when
+required Telegram, webhook or administration settings are missing, or when
+`WEBHOOK_URL` does not use HTTPS. Responses list only setting names and never
+their configured values. Use this endpoint for platform readiness probes while
+keeping `/health` available as a backward-compatible liveness check.
 
 ## Security
 
