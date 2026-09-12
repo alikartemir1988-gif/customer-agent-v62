@@ -35,7 +35,15 @@ class DashboardSecurityTests(unittest.TestCase):
             data={"password": "test-admin-key", "csrf_token": self.csrf_token()},
         )
 
-    def create_order(self, name="عميل", phone="+963900000000", city="دمشق"):
+    def create_order(
+        self,
+        name="عميل",
+        phone="+963900000000",
+        city="دمشق",
+        total=30,
+        currency="$",
+        status="new",
+    ):
         now = customer_agent.utc_now()
         conn = customer_agent.db_connect()
         cursor = conn.execute(
@@ -47,8 +55,8 @@ class DashboardSecurityTests(unittest.TestCase):
             ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
-                phone, name, phone, "الجهاز", 1, 30, 30, "$",
-                "سوريا", city, "new", "test", now, now,
+                phone, name, phone, "الجهاز", 1, total, total, currency,
+                "سوريا", city, status, "test", now, now,
             ),
         )
         conn.commit()
@@ -123,6 +131,25 @@ class DashboardSecurityTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("لا توجد طلبات ضمن هذا الفلتر", response.get_data(as_text=True))
+
+    def test_dashboard_displays_revenue_separately_by_currency(self):
+        self.create_order(phone="0933111111", total=30, currency="$")
+        self.create_order(phone="0933222222", total=500000, currency="ل.س")
+        self.create_order(
+            phone="0933333333",
+            total=90,
+            currency="$",
+            status="cancelled",
+        )
+        self.login()
+
+        response = self.client.get("/")
+        page = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('<div class="value revenue-breakdown"><div>30 $</div>', page)
+        self.assertIn("<div>500000 ل.س</div>", page)
+        self.assertNotIn("500030", page)
 
 
 if __name__ == "__main__":

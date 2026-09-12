@@ -107,6 +107,11 @@ Allowed order statuses:
 - `delivered`
 - `cancelled`
 
+The statistics endpoint includes `recorded_revenue_by_currency`, so configured
+catalogs that use multiple currencies are reported without combining unlike
+amounts. The original `recorded_revenue` field remains available for backward
+compatibility.
+
 The orders endpoint accepts integer limits from 1 to 200. Invalid limits or status
 filters return a structured `400` response instead of an internal server error.
 It also accepts an integer `offset` from 0 to 1,000,000 and returns pagination

@@ -678,6 +678,22 @@ def set_order_status(order_id, new_status, source):
     }
 
 
+def recorded_revenue_by_currency(conn):
+    rows = conn.execute(
+        """
+        SELECT currency, COALESCE(SUM(total_price), 0) AS total
+        FROM orders
+        WHERE status != 'cancelled'
+        GROUP BY currency
+        ORDER BY currency
+        """
+    ).fetchall()
+    return {
+        str(row["currency"] or "غير محددة"): money(row["total"])
+        for row in rows
+    }
+
+
 def maybe_capture_name(state, text):
     if state["name"]:
         return
@@ -1012,12 +1028,14 @@ def admin_stats():
     conn = db_connect()
     total_orders = conn.execute("SELECT COUNT(*) AS c FROM orders").fetchone()["c"]
     revenue = conn.execute("SELECT COALESCE(SUM(total_price),0) AS s FROM orders WHERE status != 'cancelled'").fetchone()["s"]
+    revenue_by_currency = recorded_revenue_by_currency(conn)
     by_status = conn.execute("SELECT status, COUNT(*) AS count FROM orders GROUP BY status").fetchall()
     conn.close()
     return jsonify({
         "ok": True,
         "total_orders": total_orders,
         "recorded_revenue": round(float(revenue), 2),
+        "recorded_revenue_by_currency": revenue_by_currency,
         "orders_by_status": {row["status"]: row["count"] for row in by_status},
     })
 

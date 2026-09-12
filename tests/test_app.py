@@ -204,6 +204,45 @@ class CustomerAgentTests(unittest.TestCase):
         payload = response.get_json()
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["total_orders"], 0)
+        self.assertEqual(payload["recorded_revenue_by_currency"], {})
+
+    def test_admin_stats_separates_revenue_by_currency(self):
+        now = customer_agent.utc_now()
+        conn = customer_agent.db_connect()
+        for index, (currency, total, status) in enumerate((
+            ("$", 30, "new"),
+            ("ل.س", 500000, "delivered"),
+            ("$", 90, "cancelled"),
+        ), start=1):
+            conn.execute(
+                """
+                INSERT INTO orders(
+                    chat_id, customer_name, customer_phone, product_name,
+                    quantity, unit_price, total_price, currency, country,
+                    city, status, customer_message, created_at, updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    str(index), "عميل", f"093300000{index}", "الجهاز",
+                    1, total, total, currency, "سوريا", "دمشق", status,
+                    "test", now, now,
+                ),
+            )
+        conn.commit()
+        conn.close()
+
+        response = self.client.get(
+            "/admin/stats",
+            headers={"X-Admin-Key": "test-admin-key"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["recorded_revenue_by_currency"], {
+            "$": 30,
+            "ل.س": 500000,
+        })
+        self.assertEqual(payload["recorded_revenue"], 500030)
 
     def test_admin_orders_rejects_non_integer_limit(self):
         response = self.client.get(

@@ -6,7 +6,7 @@ from functools import wraps
 
 from flask import Flask, redirect, render_template, request, session, url_for
 
-from app import ORDER_STATUSES, db_connect, set_order_status
+from app import ORDER_STATUSES, db_connect, recorded_revenue_by_currency, set_order_status
 
 
 ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "").strip()
@@ -137,6 +137,7 @@ def dashboard():
     recorded_revenue = conn.execute(
         "SELECT COALESCE(SUM(total_price),0) AS s FROM orders WHERE status != 'cancelled'"
     ).fetchone()["s"]
+    revenue_by_currency = recorded_revenue_by_currency(conn)
     conn.close()
 
     return render_template(
@@ -149,6 +150,7 @@ def dashboard():
         active_orders=active_orders,
         delivered_orders=delivered_orders,
         recorded_revenue=round(float(recorded_revenue), 2),
+        recorded_revenue_by_currency=revenue_by_currency,
         csrf_token=csrf_token(),
     )
 
