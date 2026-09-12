@@ -29,6 +29,10 @@ WEBHOOK_SECRET = (
 ).strip()
 ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "").strip()
 DASHBOARD_SESSION_SECRET = os.environ.get("DASHBOARD_SESSION_SECRET", "").strip()
+BOTPRESS_INTEGRATION_SECRET = os.environ.get(
+    "BOTPRESS_INTEGRATION_SECRET",
+    "",
+).strip()
 META_PAGE_ACCESS_TOKEN = os.environ.get("META_PAGE_ACCESS_TOKEN", "").strip()
 META_VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN", "").strip()
 META_APP_SECRET = os.environ.get("META_APP_SECRET", "").strip()
@@ -450,6 +454,19 @@ def init_db():
 
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS integration_messages(
+            source TEXT NOT NULL,
+            message_id TEXT NOT NULL,
+            conversation_id TEXT NOT NULL,
+            response_text TEXT NOT NULL,
+            processed_at TEXT NOT NULL,
+            PRIMARY KEY(source, message_id)
+        )
+        """
+    )
+
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS sessions(
             chat_id TEXT PRIMARY KEY,
             state_json TEXT NOT NULL,
@@ -627,6 +644,112 @@ def remember_message(message_id):
     conn.close()
 
 
+def claim_integration_message(
+    source,
+    message_id,
+    conversation_id,
+):
+
+    conn = db_connect()
+    now = datetime.now().isoformat(
+        timespec="seconds"
+    )
+    cursor = conn.execute(
+        db_sql("""
+        INSERT INTO integration_messages(
+            source,
+            message_id,
+            conversation_id,
+            response_text,
+            processed_at
+        )
+        VALUES(?,?,?,?,?)
+        ON CONFLICT(source, message_id) DO NOTHING
+        """),
+        (
+            str(source),
+            str(message_id),
+            str(conversation_id),
+            "",
+            now,
+        ),
+    )
+    claimed = cursor.rowcount == 1
+
+    row = conn.execute(
+        db_sql("""
+        SELECT conversation_id, response_text
+        FROM integration_messages
+        WHERE source = ? AND message_id = ?
+        """),
+        (
+            str(source),
+            str(message_id),
+        ),
+    ).fetchone()
+    conn.commit()
+    conn.close()
+
+    if not row:
+        raise RuntimeError(
+            "integration message claim was not stored"
+        )
+
+    return {
+        "claimed": claimed,
+        "conversation_id": row[0],
+        "response_text": row[1],
+    }
+
+
+def complete_integration_message(
+    source,
+    message_id,
+    response_text,
+):
+
+    conn = db_connect()
+    conn.execute(
+        db_sql("""
+        UPDATE integration_messages
+        SET response_text = ?, processed_at = ?
+        WHERE source = ? AND message_id = ?
+        """),
+        (
+            str(response_text),
+            datetime.now().isoformat(
+                timespec="seconds"
+            ),
+            str(source),
+            str(message_id),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def release_integration_message(
+    source,
+    message_id,
+):
+
+    conn = db_connect()
+    conn.execute(
+        db_sql("""
+        DELETE FROM integration_messages
+        WHERE source = ?
+          AND message_id = ?
+          AND response_text = ''
+        """),
+        (
+            str(source),
+            str(message_id),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
 # =========================================================
 # SESSION
 # =========================================================
@@ -644,6 +767,7 @@ def default_session_state():
         "order_id": None,
         "awaiting_confirmation": False,
         "customer_message": None,
+        "source": "direct",
     }
 
 
@@ -1265,7 +1389,7 @@ def create_order(state, original_text):
             order_id,
             None,
             "new",
-            "telegram_or_messenger",
+            state.get("source") or "direct",
             datetime.now().isoformat(timespec="seconds"),
         ),
     )
@@ -2062,9 +2186,13 @@ def _handle_message(
 def handle_message(
     chat_id,
     text,
+    source=None,
 ):
 
     try:
+        if source:
+            session(chat_id)["source"] = str(source)
+
         return _handle_message(
             chat_id,
             text,
@@ -2308,6 +2436,173 @@ def service_readiness():
     ), (200 if ready else 503)
 
 
+def botpress_response_payload(
+    conversation_key,
+    response_text,
+    duplicate,
+):
+
+    state = session(conversation_key)
+
+    return {
+        "ok": True,
+        "reply": response_text,
+        "duplicate": duplicate,
+        "core_version": APP_VERSION,
+        "progress": {
+            "buying": bool(state.get("buying")),
+            "awaiting_confirmation": bool(
+                state.get("awaiting_confirmation")
+            ),
+            "done": bool(state.get("done")),
+            "order_id": state.get("order_id"),
+        },
+    }
+
+
+@app.post("/integrations/botpress/message")
+def botpress_message():
+
+    if not BOTPRESS_INTEGRATION_SECRET:
+        return jsonify(
+            {
+                "ok": False,
+                "error": "integration unavailable",
+            }
+        ), 503
+
+    provided_secret = request.headers.get(
+        "X-Botpress-Secret",
+        "",
+    )
+
+    if not hmac.compare_digest(
+        provided_secret,
+        BOTPRESS_INTEGRATION_SECRET,
+    ):
+        return jsonify(
+            {
+                "ok": False,
+                "error": "unauthorized",
+            }
+        ), 403
+
+    payload = request.get_json(silent=True)
+
+    if not isinstance(payload, dict):
+        return jsonify(
+            {
+                "ok": False,
+                "error": "invalid JSON body",
+            }
+        ), 400
+
+    conversation_id = payload.get("conversation_id")
+    message_id = payload.get("message_id")
+    text = payload.get("text")
+
+    if not all(
+        isinstance(value, str)
+        for value in (
+            conversation_id,
+            message_id,
+            text,
+        )
+    ):
+        return jsonify(
+            {
+                "ok": False,
+                "error": (
+                    "conversation_id, message_id and text "
+                    "must be strings"
+                ),
+            }
+        ), 400
+
+    conversation_id = conversation_id.strip()
+    message_id = message_id.strip()
+    text = text.strip()
+
+    if (
+        not conversation_id
+        or not message_id
+        or not text
+        or len(conversation_id) > 200
+        or len(message_id) > 200
+        or len(text) > 4000
+    ):
+        return jsonify(
+            {
+                "ok": False,
+                "error": "invalid message fields",
+            }
+        ), 400
+
+    message_claim = claim_integration_message(
+        "botpress",
+        message_id,
+        conversation_id,
+    )
+
+    if not message_claim["claimed"]:
+        if message_claim["conversation_id"] != conversation_id:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "message id conflict",
+                }
+            ), 409
+
+        if not message_claim["response_text"]:
+            response = jsonify(
+                {
+                    "ok": False,
+                    "error": "message is processing",
+                }
+            )
+            response.headers["Retry-After"] = "1"
+            return response, 409
+
+        conversation_key = f"botpress:{conversation_id}"
+
+        return jsonify(
+            botpress_response_payload(
+                conversation_key,
+                message_claim["response_text"],
+                True,
+            )
+        )
+
+    conversation_key = f"botpress:{conversation_id}"
+
+    try:
+        answer = handle_message(
+            conversation_key,
+            text,
+            source="botpress",
+        )
+
+        complete_integration_message(
+            "botpress",
+            message_id,
+            answer,
+        )
+    except Exception:
+        release_integration_message(
+            "botpress",
+            message_id,
+        )
+        raise
+
+    return jsonify(
+        botpress_response_payload(
+            conversation_key,
+            answer,
+            False,
+        )
+    )
+
+
 @app.post("/admin/setup-webhook")
 @admin_required
 def admin_setup_webhook():
@@ -2536,6 +2831,7 @@ def telegram_webhook():
             answer = handle_message(
                 chat_id,
                 text,
+                source="telegram",
             )
 
         telegram_api(
@@ -2610,6 +2906,7 @@ def messenger_webhook():
                 answer = handle_message(
                     f"messenger:{sender_id}",
                     text,
+                    source="messenger",
                 )
                 messenger_send_text(sender_id, answer)
                 remember_message(message_id)
