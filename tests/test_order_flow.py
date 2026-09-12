@@ -18,6 +18,7 @@ class OrderFlowTests(unittest.TestCase):
         customer_agent.SESSIONS.clear()
 
         with sqlite3.connect(customer_agent.DB_PATH) as conn:
+            conn.execute("DELETE FROM order_status_events")
             conn.execute("DELETE FROM orders")
             conn.execute("DELETE FROM processed_updates")
             conn.execute("DELETE FROM processed_messages")

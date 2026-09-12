@@ -1,4 +1,4 @@
-# Customer Agent V6.2
+# Customer Agent V6.3
 
 A Telegram and Facebook Messenger sales assistant that answers product, pricing,
 and delivery questions and records confirmed customer orders.
@@ -14,6 +14,10 @@ and delivery questions and records confirmed customer orders.
 - Ignores Telegram updates that were already processed.
 - Supports an optional Telegram webhook secret.
 - Supports Meta webhook verification, signed Messenger events, and duplicate-message protection.
+- Understands common Arabic quantity, colour, payment, cancellation and multi-question phrases.
+- Exposes a protected administration API and a CSRF-protected browser dashboard.
+- Tracks order status changes in an audit trail and reports revenue by currency.
+- Supports validated merchant catalog and delivery configuration without source edits.
 
 ## Required environment variables
 
@@ -21,13 +25,17 @@ and delivery questions and records confirmed customer orders.
 - `WEBHOOK_URL`: Public HTTPS base URL of this service.
 - `DATABASE_URL`: PostgreSQL connection URL. Render supplies this automatically
   when the database is linked to the web service.
+- `TELEGRAM_WEBHOOK_SECRET`: Random secret sent by Telegram with webhook calls.
+- `ADMIN_API_KEY`: Long random key for administration API and dashboard login.
+- `DASHBOARD_SESSION_SECRET`: Independent long random value for dashboard sessions.
 - `META_PAGE_ACCESS_TOKEN`: Page access token created by Meta for the connected Facebook Page.
 - `META_VERIFY_TOKEN`: A private random value used while configuring the Meta webhook.
 - `META_APP_SECRET`: Meta App Secret used to verify signed webhook requests.
 
 ## Optional environment variables
 
-- `TELEGRAM_WEBHOOK_SECRET`: Random secret used to verify that webhook requests came from Telegram.
+- `PRODUCTS_JSON`: Optional validated product catalog JSON.
+- `DELIVERY_JSON`: Optional validated delivery-times JSON.
 - `META_GRAPH_VERSION`: Graph API version used for replies (default: `v23.0`).
 - `DB_PATH`: SQLite database path used only when `DATABASE_URL` is absent
   (default: `customer_agent.db`).
@@ -47,6 +55,12 @@ Local/demo:
 python app.py
 ```
 
+Dashboard (run as a separate private service sharing the same database):
+
+```bash
+gunicorn --bind 0.0.0.0:$PORT dashboard:dashboard_app
+```
+
 ## Test
 
 ```bash
@@ -57,10 +71,25 @@ Tests also run automatically on every push and pull request.
 
 ## Health checks
 
-- `GET /`: service health, app version, and deployed Render commit.
+- `GET /`: lightweight liveness and deployed version.
+- `GET /health`: database and merchant-configuration health.
+- `GET /ready`: production readiness, including required secrets and HTTPS webhook.
 - `GET /webhook-info`: Telegram webhook status.
 - `GET /messenger`: Meta webhook verification endpoint.
 - `POST /messenger`: Signed Facebook Messenger message webhook.
+
+## Administration API
+
+Send `X-Admin-Key: <ADMIN_API_KEY>` with every request:
+
+- `GET /admin/orders?limit=50&offset=0&status=new&q=search`
+- `GET /admin/stats`
+- `PATCH /admin/orders/<id>/status` with JSON `{ "status": "processing" }`
+- `GET /admin/orders/<id>/history`
+- `POST /admin/setup-webhook`
+
+The dashboard login uses `ADMIN_API_KEY`. Deploy it behind HTTPS and do not expose
+either administration secret in source control or logs.
 
 ## Storage note
 

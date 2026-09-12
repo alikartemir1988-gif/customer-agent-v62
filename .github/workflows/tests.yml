@@ -4,11 +4,18 @@ on:
   push:
     branches:
       - main
+      - agent/productization-v1
   pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Check out repository
@@ -22,6 +29,14 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      - name: Compile application
+        run: python -m py_compile app.py dashboard.py
+
+      - name: Validate production entry points
+        run: |
+          python -m gunicorn --check-config app:app
+          python -m gunicorn --check-config dashboard:dashboard_app
 
       - name: Run tests
         run: python -m unittest discover -s tests -v
