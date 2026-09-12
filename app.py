@@ -375,11 +375,44 @@ def explicit_name(text):
 
 
 def is_buy_intent(text):
-    return contains_any(text, [
+    n = norm(text)
+    if re.search(r"(?:^|\s)(?:ما|مو|مش)\s+(?:بدي|بدنا|اريد|نريد|حاب|حابب|حابه)(?:\s|$)", n):
+        return False
+    if contains_any(text, [
         "بدي اشتري", "اريد شراء", "أريد شراء", "بدي اخد", "بدي آخذ", "حابب اشتري",
         "حابه اشتري", "حاب اشتري", "بدي اطلب", "اريد الطلب", "أريد الطلب", "يلزمني",
         "بدي جهاز", "بدي منتج", "تسجيل طلب", "سجل طلب", "سجلي طلب", "اطلب", "اشتري",
-    ])
+    ]):
+        return True
+
+    # Accept natural phrases where a quantity or filler words separate the
+    # purchase verb from a configured product, e.g. "بدي 4 أجهزة". Limit the
+    # gap and reject information-seeking words so "بدي أعرف سعر الجهاز" does
+    # not accidentally start an order.
+    purchase_words = (
+        "بدي", "بدنا", "اريد", "نريد", "حاب", "حابب", "حابه", "يلزمني",
+        "عطيني", "اعطيني",
+    )
+    information_words = {
+        "اعرف", "اسال", "استفسر", "خبرني", "معلومات", "سعر", "لون",
+        "الوان", "توصيل", "شحن", "دفع",
+    }
+    aliases = {
+        norm(alias)
+        for name, data in PRODUCTS.items()
+        for alias in [name, *data.get("aliases", [])]
+        if norm(alias)
+    }
+    for word in purchase_words:
+        for match in re.finditer(rf"(?:^|\s){re.escape(word)}(?:\s|$)", n):
+            tail = n[match.end():].strip()
+            alias_positions = [tail.find(alias) for alias in aliases if alias in tail]
+            if not alias_positions:
+                continue
+            between = tail[:min(alias_positions)].split()
+            if len(between) <= 4 and not information_words.intersection(between):
+                return True
+    return False
 
 
 def is_products_question(text):
@@ -416,8 +449,19 @@ def is_color_question(text):
 def is_payment_question(text):
     return contains_any(text, [
         "طرق الدفع", "طريقه الدفع", "طريقة الدفع", "كيف الدفع", "كيف ادفع",
-        "كيف أدفع", "وسائل الدفع", "خيارات الدفع", "دفع عند الاستلام",
+        "كيف أدفع", "كيف فيني ادفع", "شلون ادفع", "متى لازم ادفع",
+        "امتى لازم ادفع", "وقت الدفع", "وين ادفع", "وسائل الدفع",
+        "خيارات الدفع", "دفع عند الاستلام",
     ])
+
+
+def is_cancel_command(text):
+    n = norm(text)
+    if n == "الغاء":
+        return True
+    return any(command in n for command in {
+        "الغاء الطلب", "الغي الطلب", "ابدأ من جديد", "بدايه جديده",
+    })
 
 
 def money(value):
@@ -677,7 +721,7 @@ def handle_message(chat_id, text):
 
     n = norm(text)
 
-    if contains_any(text, ["الغاء الطلب", "إلغاء الطلب", "الغي الطلب", "ابدأ من جديد", "بداية جديدة"]):
+    if is_cancel_command(text):
         reset(chat_id)
         return "✅ تمام، لغيت المحادثة الحالية. فيك تبدأ من جديد."
 

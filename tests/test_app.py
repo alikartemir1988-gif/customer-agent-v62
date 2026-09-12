@@ -367,6 +367,52 @@ class CustomerAgentTests(unittest.TestCase):
         self.assertIn("شو اسمك", response)
         self.assertNotIn("فهمت عليك جزئياً", response)
 
+    def test_quantity_between_purchase_word_and_product_starts_order(self):
+        chat_id = 7009
+
+        response = customer_agent.handle_message(chat_id, "بدي 4 أجهزة")
+
+        self.assertIn("شو اسمك", response)
+        self.assertNotIn("فهمت عليك جزئياً", response)
+        state = customer_agent.session(chat_id)
+        self.assertTrue(state["buying"])
+        self.assertEqual(state["product"], "الجهاز")
+        self.assertEqual(state["qty"], 4)
+
+        customer_agent.handle_message(chat_id, "اسمي أحمد علي")
+        customer_agent.handle_message(chat_id, "0933555555")
+        completed = customer_agent.handle_message(chat_id, "دمشق")
+        self.assertIn("الكمية: 4", completed)
+        self.assertIn("الإجمالي: 120$", completed)
+
+    def test_information_request_with_purchase_word_does_not_start_order(self):
+        chat_id = 7011
+
+        response = customer_agent.handle_message(chat_id, "بدي أعرف سعر الجهاز")
+
+        self.assertIn("30$", response)
+        self.assertFalse(customer_agent.session(chat_id)["buying"])
+
+    def test_colloquial_payment_questions_are_understood(self):
+        for index, question in enumerate(
+            ("كيف فيني ادفع", "متى لازم ادفع", "شلون أدفع"),
+            start=1,
+        ):
+            with self.subTest(question=question):
+                response = customer_agent.handle_message(7100 + index, question)
+                self.assertIn("طرق الدفع", response)
+                self.assertIn("الدفع عند الاستلام", response)
+                self.assertNotIn("فهمت عليك جزئياً", response)
+
+    def test_short_cancel_command_resets_active_order(self):
+        chat_id = 7010
+        customer_agent.handle_message(chat_id, "بدي 4 أجهزة")
+
+        response = customer_agent.handle_message(chat_id, "إلغاء")
+
+        self.assertIn("لغيت المحادثة الحالية", response)
+        self.assertEqual(customer_agent.session(chat_id), customer_agent.DEFAULT_STATE)
+
     def test_single_price_and_delivery_questions_still_work(self):
         price = customer_agent.handle_message(7006, "كم سعر الجهاز؟")
         delivery = customer_agent.handle_message(7007, "التوصيل إلى حمص؟")
