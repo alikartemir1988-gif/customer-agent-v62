@@ -11,6 +11,8 @@ from functools import wraps
 import requests
 from flask import Flask, jsonify, request
 
+from observability import customer_message_span, finish_customer_message
+
 try:
     import psycopg
 except ImportError:  # Optional for local SQLite development.
@@ -2299,24 +2301,41 @@ def handle_message(
     source=None,
 ):
 
-    try:
-        if source:
-            session(chat_id)["source"] = str(source)
+    channel = str(source or "unknown")
 
-        return _handle_message(
-            chat_id,
-            text,
-        )
-    finally:
-        state = SESSIONS.get(
-            str(chat_id)
-        )
+    with customer_message_span(
+        chat_id,
+        text,
+        channel,
+        version=APP_VERSION,
+    ) as trace_span:
 
-        if state is not None:
-            save_session(
+        try:
+            if source:
+                session(chat_id)["source"] = str(source)
+
+            answer = _handle_message(
                 chat_id,
-                state,
+                text,
             )
+
+            finish_customer_message(
+                trace_span,
+                answer,
+                SESSIONS.get(str(chat_id)),
+            )
+
+            return answer
+        finally:
+            state = SESSIONS.get(
+                str(chat_id)
+            )
+
+            if state is not None:
+                save_session(
+                    chat_id,
+                    state,
+                )
 
 
 def telegram_api(method, **data):

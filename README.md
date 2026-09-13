@@ -17,6 +17,7 @@ and delivery questions and records confirmed customer orders.
 - Supports an optional Telegram webhook secret.
 - Supports Meta webhook verification, signed Messenger events, and duplicate-message protection.
 - Supports an optional Botpress evaluation/customer-service layer while keeping this core authoritative.
+- Supports optional fail-open Langfuse tracing with customer content redacted by default.
 - Understands common Arabic quantity, colour, payment, cancellation and multi-question phrases.
 - Exposes a protected administration API and a CSRF-protected browser dashboard.
 - Tracks order status changes in an audit trail and reports revenue by currency.
@@ -40,6 +41,9 @@ and delivery questions and records confirmed customer orders.
 - `PRODUCTS_JSON`: Optional validated product catalog JSON.
 - `DELIVERY_JSON`: Optional validated delivery-times JSON.
 - `BOTPRESS_INTEGRATION_SECRET`: Independent secret for the optional Botpress adapter.
+- `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL`: Optional Langfuse connection values.
+- `LANGFUSE_TRACING_ENVIRONMENT`: Trace environment such as `production` or `staging`.
+- `LANGFUSE_CAPTURE_CONTENT`: Defaults to `false`; enable only for synthetic or consented conversations.
 - `META_GRAPH_VERSION`: Graph API version used for replies (default: `v23.0`).
 - `DB_PATH`: SQLite database path used only when `DATABASE_URL` is absent
   (default: `customer_agent.db`).
@@ -90,6 +94,17 @@ lab. It forwards messages to this Python core, which continues to own catalog
 rules, sessions, confirmation, and orders. It does not replace or copy the core.
 See [`docs/BOTPRESS_INTEGRATION.md`](docs/BOTPRESS_INTEGRATION.md) for the safety
 contract and promotion gate.
+
+## Langfuse observability
+
+Langfuse is an optional monitoring layer. It measures message-processing traces
+without changing the sales logic, and failures in Langfuse do not block customer
+replies. Customer and conversation identifiers are pseudonymized, and message
+content is redacted unless `LANGFUSE_CAPTURE_CONTENT=true` is explicitly set.
+
+GitHub Actions secrets only power the synthetic connection check. Add the same
+three connection values to the Render service environment to trace production
+traffic. See [`docs/LANGFUSE_INTEGRATION.md`](docs/LANGFUSE_INTEGRATION.md).
 
 ## Administration API
 

@@ -6,6 +6,7 @@ on:
       - main
       - agent/productization-v1
       - botpress-evaluation
+      - langfuse-observability
   pull_request:
     branches:
       - main
@@ -41,6 +42,16 @@ jobs:
 
       - name: Run tests
         run: python -m unittest discover -s tests -v
+
+      - name: Verify Langfuse credentials and submit a synthetic trace
+        if: github.event_name == 'push'
+        env:
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL }}
+          LANGFUSE_TRACING_ENVIRONMENT: ci
+          LANGFUSE_CAPTURE_CONTENT: "false"
+        run: python scripts/langfuse_smoke.py
 
   botpress-typecheck:
     runs-on: ubuntu-latest
