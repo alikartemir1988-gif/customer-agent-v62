@@ -35,6 +35,15 @@ export default new Eval({
       },
     },
     {
+      user: 'بدي الأبيض',
+      assert: {
+        response: [
+          { contains: 'راجع طلبك' },
+          { contains: 'اللون: أبيض' },
+        ],
+      },
+    },
+    {
       user: 'تأكيد',
       assert: {
         response: [{ contains: 'تم تسجيل طلبك بنجاح' }],

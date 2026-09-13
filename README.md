@@ -1,4 +1,4 @@
-# Customer Agent V6.3
+# Customer Agent V6.3.2
 
 A Telegram and Facebook Messenger sales assistant that answers product, pricing,
 and delivery questions and records confirmed customer orders.
@@ -6,10 +6,12 @@ and delivery questions and records confirmed customer orders.
 ## Current behavior
 
 - Answers product, price, and delivery questions in Arabic.
-- Collects product, quantity, name, phone, and city.
+- Collects product, optional colour, quantity, name, phone, and city.
 - Shows a complete order review before saving.
 - Saves only after the customer writes `تأكيد`, `نعم`, or another supported confirmation.
 - Lets the customer change details before confirmation.
+- Persists a selected product colour and shows it in the review, confirmation,
+  administration API, and dashboard.
 - Restores an unfinished or completed conversation after an app restart.
 - Ignores Telegram updates that were already processed.
 - Supports an optional Telegram webhook secret.

@@ -176,6 +176,7 @@ class BotpressIntegrationTests(unittest.TestCase):
             "أحمد خالد",
             "0933123456",
             "دمشق",
+            "بدي الأبيض",
             "تأكيد",
         )
 
@@ -193,10 +194,17 @@ class BotpressIntegrationTests(unittest.TestCase):
         self.assertTrue(payload["progress"]["done"])
         self.assertEqual(self.order_count(), 1)
 
+        with sqlite3.connect(customer_agent.DB_PATH) as conn:
+            saved_color = conn.execute(
+                "SELECT color FROM orders"
+            ).fetchone()[0]
+
+        self.assertEqual(saved_color, "أبيض")
+
         customer_agent.SESSIONS.clear()
         repeated = self.post_message(
             "تأكيد",
-            message_id="order-message-5",
+            message_id="order-message-6",
             conversation_id="order-conversation",
         )
 

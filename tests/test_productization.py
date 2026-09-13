@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import tempfile
 import unittest
 from unittest import mock
@@ -32,21 +33,29 @@ class ProductizationTests(unittest.TestCase):
     def admin_headers(self):
         return {"X-Admin-Key": "test-admin-key"}
 
-    def create_order(self, name="عميل", phone="0933000000", currency="$", price=30, status="new"):
+    def create_order(
+        self,
+        name="عميل",
+        phone="0933000000",
+        currency="$",
+        price=30,
+        status="new",
+        color=None,
+    ):
         conn = customer_agent.db_connect()
         cursor = conn.execute(
             customer_agent.db_sql(
                 """
                 INSERT INTO orders(
-                    customer_name, customer_phone, product_name, quantity,
+                    customer_name, customer_phone, product_name, color, quantity,
                     price, currency, country, city, status,
                     customer_message, created_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
                 """
             ),
             (
-                name, phone, "الجهاز", 1, price, currency, "سوريا", "دمشق",
-                status, "test", "2026-09-12T12:00:00",
+                name, phone, "الجهاز", color, 1, price, currency, "سوريا",
+                "دمشق", status, "test", "2026-09-12T12:00:00",
             ),
         )
         order_id = cursor.lastrowid
@@ -93,8 +102,36 @@ class ProductizationTests(unittest.TestCase):
         finally:
             customer_agent.CONFIGURATION_ERRORS[:] = errors_before
 
+    def test_init_db_adds_color_without_replacing_legacy_orders(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database_path = os.path.join(directory, "legacy.db")
+            with sqlite3.connect(database_path) as conn:
+                conn.execute(
+                    "CREATE TABLE orders(id INTEGER PRIMARY KEY, status TEXT)"
+                )
+                conn.execute("INSERT INTO orders(id, status) VALUES(1, 'new')")
+                conn.commit()
+
+            with (
+                mock.patch.object(customer_agent, "DB_PATH", database_path),
+                mock.patch.object(customer_agent, "DATABASE_URL", ""),
+            ):
+                customer_agent.init_db()
+
+            with sqlite3.connect(database_path) as conn:
+                columns = {
+                    row[1]
+                    for row in conn.execute("PRAGMA table_info(orders)").fetchall()
+                }
+                saved = conn.execute(
+                    "SELECT status, color FROM orders WHERE id = 1"
+                ).fetchone()
+
+        self.assertIn("color", columns)
+        self.assertEqual(saved, ("new", None))
+
     def test_admin_auth_pagination_and_literal_wildcard_search(self):
-        self.create_order(name="أحمد % المميز")
+        self.create_order(name="أحمد % المميز", color="أبيض")
         self.create_order(name="سارة")
 
         self.assertEqual(self.client.get("/admin/orders").status_code, 401)
@@ -105,6 +142,13 @@ class ProductizationTests(unittest.TestCase):
         payload = response.get_json()
         self.assertEqual(payload["pagination"]["total"], 1)
         self.assertEqual(payload["orders"][0]["customer_name"], "أحمد % المميز")
+
+        color_search = self.client.get(
+            "/admin/orders?q=أبيض",
+            headers=self.admin_headers(),
+        ).get_json()
+        self.assertEqual(color_search["pagination"]["total"], 1)
+        self.assertEqual(color_search["orders"][0]["color"], "أبيض")
 
         invalid = self.client.get("/admin/orders?limit=all", headers=self.admin_headers())
         self.assertEqual(invalid.status_code, 400)

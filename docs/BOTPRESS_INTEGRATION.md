@@ -3,7 +3,7 @@
 ## Purpose
 
 Botpress is a development lab and an additional customer-service/channel layer.
-Customer Agent V6.3 remains the owned, sellable product and the authoritative
+Customer Agent V6.3.2 remains the owned, sellable product and the authoritative
 system for business rules and records.
 
 ## Data flow

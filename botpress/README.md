@@ -1,6 +1,6 @@
 # Botpress Lab and Customer-Service Layer
 
-This directory is an adapter around Customer Agent V6.3, not a replacement for
+This directory is an adapter around Customer Agent V6.3.2, not a replacement for
 it. The Python application remains the source of truth for catalog rules,
 conversation state, customer data, order confirmation, and order storage.
 

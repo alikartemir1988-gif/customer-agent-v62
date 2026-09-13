@@ -39,7 +39,7 @@ META_APP_SECRET = os.environ.get("META_APP_SECRET", "").strip()
 META_GRAPH_VERSION = os.environ.get("META_GRAPH_VERSION", "v23.0").strip()
 DB_PATH = os.environ.get("DB_PATH", "customer_agent.db").strip()
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
-APP_VERSION = "6.3.1"
+APP_VERSION = "6.3.2"
 GIT_COMMIT = os.environ.get("RENDER_GIT_COMMIT", "").strip()
 
 API = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
@@ -422,6 +422,7 @@ def init_db():
             customer_name TEXT,
             customer_phone TEXT,
             product_name TEXT,
+            color TEXT,
             quantity INTEGER,
             price REAL,
             currency TEXT,
@@ -433,6 +434,18 @@ def init_db():
         )
         """
     )
+
+    if using_postgres():
+        conn.execute(
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS color TEXT"
+        )
+    else:
+        order_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(orders)").fetchall()
+        }
+        if "color" not in order_columns:
+            conn.execute("ALTER TABLE orders ADD COLUMN color TEXT")
 
     conn.execute(
         """
@@ -761,6 +774,7 @@ def default_session_state():
         "phone": None,
         "city": None,
         "product": None,
+        "color": None,
         "qty": 1,
         "buying": False,
         "done": False,
@@ -1194,6 +1208,73 @@ def is_color_question(text):
     )
 
 
+def product_colors(product_name):
+
+    data = PRODUCTS.get(product_name, {})
+    colors = data.get("colors", [])
+
+    if isinstance(colors, str):
+        return [
+            color.strip()
+            for color in re.split(r"[,،]", colors)
+            if color.strip()
+        ]
+
+    return list(colors)
+
+
+def detect_color(text, product_name=None):
+
+    if product_name in PRODUCTS:
+        colors = product_colors(product_name)
+    else:
+        colors = []
+        for name in PRODUCTS:
+            for color in product_colors(name):
+                if color not in colors:
+                    colors.append(color)
+
+    normalized_text = norm(text)
+
+    for color in sorted(colors, key=lambda item: len(norm(item)), reverse=True):
+        normalized_color = norm(color)
+        if not normalized_color:
+            continue
+
+        prefix = "" if normalized_color.startswith("ال") else r"(?:ال)?"
+        if re.search(
+            rf"(?:^|\s){prefix}{re.escape(normalized_color)}(?:\s|$)",
+            normalized_text,
+        ):
+            return color
+
+    return None
+
+
+def detect_color_choice(text, product_name=None):
+
+    color = detect_color(text, product_name)
+    if not color or is_color_question(text):
+        return None
+
+    normalized_text = norm(text)
+    question_words = {
+        "هل",
+        "شو",
+        "ما",
+        "ماهو",
+        "ماهي",
+        "كم",
+        "متوفر",
+        "متوفره",
+    }
+
+    if any(word in normalized_text.split() for word in question_words):
+        return None
+
+    return color
+
+
 def is_payment_question(text):
 
     return contains_any(
@@ -1243,7 +1324,7 @@ def product_information_answers(text, state, detected_product=None):
     if is_color_question(text):
         if selected:
             product_name, data = selected
-            colors = data.get("colors", [])
+            colors = product_colors(product_name)
             if colors:
                 answers.append(
                     f"ألوان {product_name} المتوفرة: "
@@ -1334,6 +1415,7 @@ def create_order(state, original_text):
             customer_name,
             customer_phone,
             product_name,
+            color,
             quantity,
             price,
             currency,
@@ -1343,7 +1425,7 @@ def create_order(state, original_text):
             customer_message,
             created_at
         )
-        VALUES(?,?,?,?,?,?,?,?,?,?,?)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
     """
 
     if using_postgres():
@@ -1355,6 +1437,7 @@ def create_order(state, original_text):
             state["name"],
             state["phone"],
             state["product"],
+            state.get("color"),
             state["qty"],
             product["price"],
             product["currency"],
@@ -1433,9 +1516,10 @@ def list_orders(status="", search="", limit=50, offset=0):
             "(CAST(id AS TEXT) = ? OR customer_name LIKE ? ESCAPE '\\' "
             "OR customer_phone LIKE ? ESCAPE '\\' "
             "OR product_name LIKE ? ESCAPE '\\' "
+            "OR color LIKE ? ESCAPE '\\' "
             "OR city LIKE ? ESCAPE '\\')"
         )
-        params.extend([search, pattern, pattern, pattern, pattern])
+        params.extend([search, pattern, pattern, pattern, pattern, pattern])
 
     where_sql = " WHERE " + " AND ".join(clauses) if clauses else ""
     conn = db_connect()
@@ -1448,7 +1532,7 @@ def list_orders(status="", search="", limit=50, offset=0):
 
     cursor = conn.execute(
         db_sql(
-            "SELECT id, customer_name, customer_phone, product_name, quantity, "
+            "SELECT id, customer_name, customer_phone, product_name, color, quantity, "
             "price AS unit_price, (price * quantity) AS total_price, currency, "
             "country, city, status, customer_message, created_at "
             "FROM orders" + where_sql + " ORDER BY id DESC LIMIT ? OFFSET ?"
@@ -1629,10 +1713,17 @@ def order_review_text(state):
         * state["qty"]
     )
 
+    color_line = (
+        f"اللون: {state['color']}\n"
+        if state.get("color")
+        else ""
+    )
+
     return (
         "🧾 راجع طلبك قبل التسجيل:\n\n"
         f"الاسم: {state['name']}\n"
         f"المنتج: {state['product']}\n"
+        f"{color_line}"
         f"الكمية: {state['qty']}\n"
         f"الإجمالي: "
         f"{money_text(total)}"
@@ -1676,11 +1767,18 @@ def complete_order(state, confirmation_text):
         * state["qty"]
     )
 
+    color_line = (
+        f"اللون: {state['color']}\n"
+        if state.get("color")
+        else ""
+    )
+
     return (
         "✅ تم تسجيل طلبك بنجاح\n\n"
         f"رقم الطلب: {order_id}\n"
         f"الاسم: {state['name']}\n"
         f"المنتج: {state['product']}\n"
+        f"{color_line}"
         f"الكمية: {state['qty']}\n"
         f"الإجمالي: "
         f"{money_text(total)}"
@@ -1716,6 +1814,7 @@ def maybe_capture_name(
         and not detect_phone(text)
         and not detect_city(text)
         and not detect_product(text)
+        and not detect_color(text, state.get("product"))
     ):
 
         words = norm(text).split()
@@ -1801,6 +1900,16 @@ def _handle_message(
 
     if product:
         state["product"] = product[0]
+        if state.get("color") not in product_colors(product[0]):
+            state["color"] = None
+
+    color = detect_color_choice(
+        text,
+        state.get("product"),
+    )
+
+    if color:
+        state["color"] = color
 
     if name:
         state["name"] = name
@@ -1902,6 +2011,7 @@ def _handle_message(
             phone
             or city
             or product
+            or color
             or name
             or contains_any(
                 text,

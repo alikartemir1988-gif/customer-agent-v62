@@ -3,7 +3,7 @@ import { defineConfig, z } from '@botpress/runtime'
 export default defineConfig({
   name: 'customer-agent-v63-lab',
   description:
-    'Botpress evaluation and customer-service layer backed by the owned Customer Agent V6.3 core',
+    'Botpress evaluation and customer-service layer backed by the owned Customer Agent V6.3.2 core',
 
   bot: {
     state: z.object({}),
