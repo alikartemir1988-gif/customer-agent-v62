@@ -48,7 +48,7 @@ jobs:
         env:
           LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
           LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
-          LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL }}
+          LANGFUSE_BASE_URL: https://us.cloud.langfuse.com
           LANGFUSE_TRACING_ENVIRONMENT: ci
           LANGFUSE_CAPTURE_CONTENT: "false"
         run: python scripts/langfuse_smoke.py
