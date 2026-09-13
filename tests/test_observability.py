@@ -36,6 +36,36 @@ class ObservabilityTests(unittest.TestCase):
                 observability.langfuse_is_configured()
             )
 
+    def test_base_url_is_normalized_without_scheme(self):
+        values = {
+            "LANGFUSE_BASE_URL": "us.cloud.langfuse.com",
+        }
+        with mock.patch.dict(os.environ, values, clear=True):
+            self.assertEqual(
+                observability._normalized_base_url(),
+                "https://us.cloud.langfuse.com",
+            )
+
+    def test_base_url_accepts_copied_env_assignment(self):
+        values = {
+            "LANGFUSE_BASE_URL": (
+                'LANGFUSE_BASE_URL="https://us.cloud.langfuse.com"'
+            ),
+        }
+        with mock.patch.dict(os.environ, values, clear=True):
+            self.assertEqual(
+                observability._normalized_base_url(),
+                "https://us.cloud.langfuse.com",
+            )
+
+    def test_base_url_rejects_unofficial_hosts(self):
+        values = {
+            "LANGFUSE_BASE_URL": "https://example.invalid",
+        }
+        with mock.patch.dict(os.environ, values, clear=True):
+            with self.assertRaises(ValueError):
+                observability._normalized_base_url()
+
     def test_content_is_redacted_by_default(self):
         with mock.patch.dict(os.environ, {}, clear=True):
             payload = observability._content_payload(

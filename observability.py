@@ -5,6 +5,7 @@ import hmac
 import logging
 import os
 from contextlib import contextmanager
+from urllib.parse import urlsplit
 
 
 LOGGER = logging.getLogger(__name__)
@@ -26,9 +27,54 @@ def _flag(name, default=False):
     return value.strip().lower() in _TRUE_VALUES
 
 
+def _clean_env_value(name):
+    value = os.environ.get(name, "").strip()
+
+    assignment_prefix = f"{name}="
+    if value.startswith(assignment_prefix):
+        value = value[len(assignment_prefix):].strip()
+
+    if value.lower().startswith("value:"):
+        value = value.split(":", 1)[1].strip()
+
+    return value.strip().strip('"').strip("'")
+
+
+def _normalized_base_url():
+    value = _clean_env_value("LANGFUSE_BASE_URL")
+    if not value:
+        raise ValueError("Langfuse base URL is missing")
+
+    if "://" not in value:
+        value = f"https://{value}"
+
+    parsed = urlsplit(value)
+    allowed_hosts = {
+        "cloud.langfuse.com",
+        "us.cloud.langfuse.com",
+        "jp.cloud.langfuse.com",
+        "hipaa.cloud.langfuse.com",
+    }
+
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname not in allowed_hosts
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in ("", "/")
+    ):
+        raise ValueError(
+            "Langfuse base URL must be an official HTTPS cloud endpoint"
+        )
+
+    return f"https://{parsed.netloc}"
+
+
 def langfuse_is_configured():
     return all(
-        os.environ.get(name, "").strip()
+        _clean_env_value(name)
         for name in _REQUIRED_ENV
     )
 
@@ -72,9 +118,30 @@ def _get_langfuse_client():
         return _langfuse_client
 
     try:
-        from langfuse import get_client
+        from langfuse import Langfuse
 
-        _langfuse_client = get_client()
+        _langfuse_client = Langfuse(
+            public_key=_clean_env_value(
+                "LANGFUSE_PUBLIC_KEY"
+            ),
+            secret_key=_clean_env_value(
+                "LANGFUSE_SECRET_KEY"
+            ),
+            base_url=_normalized_base_url(),
+            environment=(
+                _clean_env_value(
+                    "LANGFUSE_TRACING_ENVIRONMENT"
+                )
+                or None
+            ),
+            release=(
+                os.environ.get(
+                    "RENDER_GIT_COMMIT",
+                    "",
+                ).strip()
+                or None
+            ),
+        )
     except Exception as exc:
         _langfuse_unavailable = True
         LOGGER.warning(
