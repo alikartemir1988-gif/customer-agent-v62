@@ -1749,11 +1749,17 @@ def complete_order(state, confirmation_text):
             f"{state['order_id']}"
         )
 
-    order_id = create_order(
-        state,
-        state.get("customer_message")
-        or confirmation_text,
-    )
+    if state.get("source") == "demo":
+        order_id = (
+            "DEMO-"
+            + datetime.now().strftime("%H%M%S")
+        )
+    else:
+        order_id = create_order(
+            state,
+            state.get("customer_message")
+            or confirmation_text,
+        )
 
     state["done"] = True
     state["order_id"] = order_id
@@ -2331,7 +2337,10 @@ def handle_message(
                 str(chat_id)
             )
 
-            if state is not None:
+            if (
+                state is not None
+                and state.get("source") != "demo"
+            ):
                 save_session(
                     chat_id,
                     state,
