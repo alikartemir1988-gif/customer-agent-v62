@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - agent/productization-v1
+      - botpress-evaluation
   pull_request:
     branches:
       - main
@@ -40,3 +41,30 @@ jobs:
 
       - name: Run tests
         run: python -m unittest discover -s tests -v
+
+  botpress-typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: botpress/package-lock.json
+
+      - name: Install Botpress dependencies
+        working-directory: botpress
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Type-check Botpress adapter and evals
+        working-directory: botpress
+        run: npm run typecheck
+
+      - name: Audit Botpress production dependencies
+        working-directory: botpress
+        run: npm audit --omit=dev --audit-level=high

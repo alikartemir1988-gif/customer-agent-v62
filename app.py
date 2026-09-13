@@ -29,13 +29,17 @@ WEBHOOK_SECRET = (
 ).strip()
 ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "").strip()
 DASHBOARD_SESSION_SECRET = os.environ.get("DASHBOARD_SESSION_SECRET", "").strip()
+BOTPRESS_INTEGRATION_SECRET = os.environ.get(
+    "BOTPRESS_INTEGRATION_SECRET",
+    "",
+).strip()
 META_PAGE_ACCESS_TOKEN = os.environ.get("META_PAGE_ACCESS_TOKEN", "").strip()
 META_VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN", "").strip()
 META_APP_SECRET = os.environ.get("META_APP_SECRET", "").strip()
 META_GRAPH_VERSION = os.environ.get("META_GRAPH_VERSION", "v23.0").strip()
 DB_PATH = os.environ.get("DB_PATH", "customer_agent.db").strip()
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
-APP_VERSION = "6.3.1"
+APP_VERSION = "6.3.2"
 GIT_COMMIT = os.environ.get("RENDER_GIT_COMMIT", "").strip()
 
 API = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
@@ -418,6 +422,7 @@ def init_db():
             customer_name TEXT,
             customer_phone TEXT,
             product_name TEXT,
+            color TEXT,
             quantity INTEGER,
             price REAL,
             currency TEXT,
@@ -429,6 +434,18 @@ def init_db():
         )
         """
     )
+
+    if using_postgres():
+        conn.execute(
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS color TEXT"
+        )
+    else:
+        order_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(orders)").fetchall()
+        }
+        if "color" not in order_columns:
+            conn.execute("ALTER TABLE orders ADD COLUMN color TEXT")
 
     conn.execute(
         """
@@ -444,6 +461,19 @@ def init_db():
         CREATE TABLE IF NOT EXISTS processed_messages(
             message_id TEXT PRIMARY KEY,
             processed_at TEXT NOT NULL
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS integration_messages(
+            source TEXT NOT NULL,
+            message_id TEXT NOT NULL,
+            conversation_id TEXT NOT NULL,
+            response_text TEXT NOT NULL,
+            processed_at TEXT NOT NULL,
+            PRIMARY KEY(source, message_id)
         )
         """
     )
@@ -627,6 +657,112 @@ def remember_message(message_id):
     conn.close()
 
 
+def claim_integration_message(
+    source,
+    message_id,
+    conversation_id,
+):
+
+    conn = db_connect()
+    now = datetime.now().isoformat(
+        timespec="seconds"
+    )
+    cursor = conn.execute(
+        db_sql("""
+        INSERT INTO integration_messages(
+            source,
+            message_id,
+            conversation_id,
+            response_text,
+            processed_at
+        )
+        VALUES(?,?,?,?,?)
+        ON CONFLICT(source, message_id) DO NOTHING
+        """),
+        (
+            str(source),
+            str(message_id),
+            str(conversation_id),
+            "",
+            now,
+        ),
+    )
+    claimed = cursor.rowcount == 1
+
+    row = conn.execute(
+        db_sql("""
+        SELECT conversation_id, response_text
+        FROM integration_messages
+        WHERE source = ? AND message_id = ?
+        """),
+        (
+            str(source),
+            str(message_id),
+        ),
+    ).fetchone()
+    conn.commit()
+    conn.close()
+
+    if not row:
+        raise RuntimeError(
+            "integration message claim was not stored"
+        )
+
+    return {
+        "claimed": claimed,
+        "conversation_id": row[0],
+        "response_text": row[1],
+    }
+
+
+def complete_integration_message(
+    source,
+    message_id,
+    response_text,
+):
+
+    conn = db_connect()
+    conn.execute(
+        db_sql("""
+        UPDATE integration_messages
+        SET response_text = ?, processed_at = ?
+        WHERE source = ? AND message_id = ?
+        """),
+        (
+            str(response_text),
+            datetime.now().isoformat(
+                timespec="seconds"
+            ),
+            str(source),
+            str(message_id),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def release_integration_message(
+    source,
+    message_id,
+):
+
+    conn = db_connect()
+    conn.execute(
+        db_sql("""
+        DELETE FROM integration_messages
+        WHERE source = ?
+          AND message_id = ?
+          AND response_text = ''
+        """),
+        (
+            str(source),
+            str(message_id),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
 # =========================================================
 # SESSION
 # =========================================================
@@ -638,12 +774,14 @@ def default_session_state():
         "phone": None,
         "city": None,
         "product": None,
+        "color": None,
         "qty": 1,
         "buying": False,
         "done": False,
         "order_id": None,
         "awaiting_confirmation": False,
         "customer_message": None,
+        "source": "direct",
     }
 
 
@@ -1070,6 +1208,73 @@ def is_color_question(text):
     )
 
 
+def product_colors(product_name):
+
+    data = PRODUCTS.get(product_name, {})
+    colors = data.get("colors", [])
+
+    if isinstance(colors, str):
+        return [
+            color.strip()
+            for color in re.split(r"[,،]", colors)
+            if color.strip()
+        ]
+
+    return list(colors)
+
+
+def detect_color(text, product_name=None):
+
+    if product_name in PRODUCTS:
+        colors = product_colors(product_name)
+    else:
+        colors = []
+        for name in PRODUCTS:
+            for color in product_colors(name):
+                if color not in colors:
+                    colors.append(color)
+
+    normalized_text = norm(text)
+
+    for color in sorted(colors, key=lambda item: len(norm(item)), reverse=True):
+        normalized_color = norm(color)
+        if not normalized_color:
+            continue
+
+        prefix = "" if normalized_color.startswith("ال") else r"(?:ال)?"
+        if re.search(
+            rf"(?:^|\s){prefix}{re.escape(normalized_color)}(?:\s|$)",
+            normalized_text,
+        ):
+            return color
+
+    return None
+
+
+def detect_color_choice(text, product_name=None):
+
+    color = detect_color(text, product_name)
+    if not color or is_color_question(text):
+        return None
+
+    normalized_text = norm(text)
+    question_words = {
+        "هل",
+        "شو",
+        "ما",
+        "ماهو",
+        "ماهي",
+        "كم",
+        "متوفر",
+        "متوفره",
+    }
+
+    if any(word in normalized_text.split() for word in question_words):
+        return None
+
+    return color
+
+
 def is_payment_question(text):
 
     return contains_any(
@@ -1119,7 +1324,7 @@ def product_information_answers(text, state, detected_product=None):
     if is_color_question(text):
         if selected:
             product_name, data = selected
-            colors = data.get("colors", [])
+            colors = product_colors(product_name)
             if colors:
                 answers.append(
                     f"ألوان {product_name} المتوفرة: "
@@ -1210,6 +1415,7 @@ def create_order(state, original_text):
             customer_name,
             customer_phone,
             product_name,
+            color,
             quantity,
             price,
             currency,
@@ -1219,7 +1425,7 @@ def create_order(state, original_text):
             customer_message,
             created_at
         )
-        VALUES(?,?,?,?,?,?,?,?,?,?,?)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
     """
 
     if using_postgres():
@@ -1231,6 +1437,7 @@ def create_order(state, original_text):
             state["name"],
             state["phone"],
             state["product"],
+            state.get("color"),
             state["qty"],
             product["price"],
             product["currency"],
@@ -1265,7 +1472,7 @@ def create_order(state, original_text):
             order_id,
             None,
             "new",
-            "telegram_or_messenger",
+            state.get("source") or "direct",
             datetime.now().isoformat(timespec="seconds"),
         ),
     )
@@ -1309,9 +1516,10 @@ def list_orders(status="", search="", limit=50, offset=0):
             "(CAST(id AS TEXT) = ? OR customer_name LIKE ? ESCAPE '\\' "
             "OR customer_phone LIKE ? ESCAPE '\\' "
             "OR product_name LIKE ? ESCAPE '\\' "
+            "OR color LIKE ? ESCAPE '\\' "
             "OR city LIKE ? ESCAPE '\\')"
         )
-        params.extend([search, pattern, pattern, pattern, pattern])
+        params.extend([search, pattern, pattern, pattern, pattern, pattern])
 
     where_sql = " WHERE " + " AND ".join(clauses) if clauses else ""
     conn = db_connect()
@@ -1324,7 +1532,7 @@ def list_orders(status="", search="", limit=50, offset=0):
 
     cursor = conn.execute(
         db_sql(
-            "SELECT id, customer_name, customer_phone, product_name, quantity, "
+            "SELECT id, customer_name, customer_phone, product_name, color, quantity, "
             "price AS unit_price, (price * quantity) AS total_price, currency, "
             "country, city, status, customer_message, created_at "
             "FROM orders" + where_sql + " ORDER BY id DESC LIMIT ? OFFSET ?"
@@ -1505,10 +1713,17 @@ def order_review_text(state):
         * state["qty"]
     )
 
+    color_line = (
+        f"اللون: {state['color']}\n"
+        if state.get("color")
+        else ""
+    )
+
     return (
         "🧾 راجع طلبك قبل التسجيل:\n\n"
         f"الاسم: {state['name']}\n"
         f"المنتج: {state['product']}\n"
+        f"{color_line}"
         f"الكمية: {state['qty']}\n"
         f"الإجمالي: "
         f"{money_text(total)}"
@@ -1552,11 +1767,18 @@ def complete_order(state, confirmation_text):
         * state["qty"]
     )
 
+    color_line = (
+        f"اللون: {state['color']}\n"
+        if state.get("color")
+        else ""
+    )
+
     return (
         "✅ تم تسجيل طلبك بنجاح\n\n"
         f"رقم الطلب: {order_id}\n"
         f"الاسم: {state['name']}\n"
         f"المنتج: {state['product']}\n"
+        f"{color_line}"
         f"الكمية: {state['qty']}\n"
         f"الإجمالي: "
         f"{money_text(total)}"
@@ -1592,6 +1814,7 @@ def maybe_capture_name(
         and not detect_phone(text)
         and not detect_city(text)
         and not detect_product(text)
+        and not detect_color(text, state.get("product"))
     ):
 
         words = norm(text).split()
@@ -1677,6 +1900,16 @@ def _handle_message(
 
     if product:
         state["product"] = product[0]
+        if state.get("color") not in product_colors(product[0]):
+            state["color"] = None
+
+    color = detect_color_choice(
+        text,
+        state.get("product"),
+    )
+
+    if color:
+        state["color"] = color
 
     if name:
         state["name"] = name
@@ -1778,6 +2011,7 @@ def _handle_message(
             phone
             or city
             or product
+            or color
             or name
             or contains_any(
                 text,
@@ -2062,9 +2296,13 @@ def _handle_message(
 def handle_message(
     chat_id,
     text,
+    source=None,
 ):
 
     try:
+        if source:
+            session(chat_id)["source"] = str(source)
+
         return _handle_message(
             chat_id,
             text,
@@ -2308,6 +2546,173 @@ def service_readiness():
     ), (200 if ready else 503)
 
 
+def botpress_response_payload(
+    conversation_key,
+    response_text,
+    duplicate,
+):
+
+    state = session(conversation_key)
+
+    return {
+        "ok": True,
+        "reply": response_text,
+        "duplicate": duplicate,
+        "core_version": APP_VERSION,
+        "progress": {
+            "buying": bool(state.get("buying")),
+            "awaiting_confirmation": bool(
+                state.get("awaiting_confirmation")
+            ),
+            "done": bool(state.get("done")),
+            "order_id": state.get("order_id"),
+        },
+    }
+
+
+@app.post("/integrations/botpress/message")
+def botpress_message():
+
+    if not BOTPRESS_INTEGRATION_SECRET:
+        return jsonify(
+            {
+                "ok": False,
+                "error": "integration unavailable",
+            }
+        ), 503
+
+    provided_secret = request.headers.get(
+        "X-Botpress-Secret",
+        "",
+    )
+
+    if not hmac.compare_digest(
+        provided_secret,
+        BOTPRESS_INTEGRATION_SECRET,
+    ):
+        return jsonify(
+            {
+                "ok": False,
+                "error": "unauthorized",
+            }
+        ), 403
+
+    payload = request.get_json(silent=True)
+
+    if not isinstance(payload, dict):
+        return jsonify(
+            {
+                "ok": False,
+                "error": "invalid JSON body",
+            }
+        ), 400
+
+    conversation_id = payload.get("conversation_id")
+    message_id = payload.get("message_id")
+    text = payload.get("text")
+
+    if not all(
+        isinstance(value, str)
+        for value in (
+            conversation_id,
+            message_id,
+            text,
+        )
+    ):
+        return jsonify(
+            {
+                "ok": False,
+                "error": (
+                    "conversation_id, message_id and text "
+                    "must be strings"
+                ),
+            }
+        ), 400
+
+    conversation_id = conversation_id.strip()
+    message_id = message_id.strip()
+    text = text.strip()
+
+    if (
+        not conversation_id
+        or not message_id
+        or not text
+        or len(conversation_id) > 200
+        or len(message_id) > 200
+        or len(text) > 4000
+    ):
+        return jsonify(
+            {
+                "ok": False,
+                "error": "invalid message fields",
+            }
+        ), 400
+
+    message_claim = claim_integration_message(
+        "botpress",
+        message_id,
+        conversation_id,
+    )
+
+    if not message_claim["claimed"]:
+        if message_claim["conversation_id"] != conversation_id:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "message id conflict",
+                }
+            ), 409
+
+        if not message_claim["response_text"]:
+            response = jsonify(
+                {
+                    "ok": False,
+                    "error": "message is processing",
+                }
+            )
+            response.headers["Retry-After"] = "1"
+            return response, 409
+
+        conversation_key = f"botpress:{conversation_id}"
+
+        return jsonify(
+            botpress_response_payload(
+                conversation_key,
+                message_claim["response_text"],
+                True,
+            )
+        )
+
+    conversation_key = f"botpress:{conversation_id}"
+
+    try:
+        answer = handle_message(
+            conversation_key,
+            text,
+            source="botpress",
+        )
+
+        complete_integration_message(
+            "botpress",
+            message_id,
+            answer,
+        )
+    except Exception:
+        release_integration_message(
+            "botpress",
+            message_id,
+        )
+        raise
+
+    return jsonify(
+        botpress_response_payload(
+            conversation_key,
+            answer,
+            False,
+        )
+    )
+
+
 @app.post("/admin/setup-webhook")
 @admin_required
 def admin_setup_webhook():
@@ -2536,6 +2941,7 @@ def telegram_webhook():
             answer = handle_message(
                 chat_id,
                 text,
+                source="telegram",
             )
 
         telegram_api(
@@ -2610,6 +3016,7 @@ def messenger_webhook():
                 answer = handle_message(
                     f"messenger:{sender_id}",
                     text,
+                    source="messenger",
                 )
                 messenger_send_text(sender_id, answer)
                 remember_message(message_id)

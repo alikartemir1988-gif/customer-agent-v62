@@ -1,4 +1,4 @@
-# Customer Agent V6.3
+# Customer Agent V6.3.2
 
 A Telegram and Facebook Messenger sales assistant that answers product, pricing,
 and delivery questions and records confirmed customer orders.
@@ -6,14 +6,17 @@ and delivery questions and records confirmed customer orders.
 ## Current behavior
 
 - Answers product, price, and delivery questions in Arabic.
-- Collects product, quantity, name, phone, and city.
+- Collects product, optional colour, quantity, name, phone, and city.
 - Shows a complete order review before saving.
 - Saves only after the customer writes `تأكيد`, `نعم`, or another supported confirmation.
 - Lets the customer change details before confirmation.
+- Persists a selected product colour and shows it in the review, confirmation,
+  administration API, and dashboard.
 - Restores an unfinished or completed conversation after an app restart.
 - Ignores Telegram updates that were already processed.
 - Supports an optional Telegram webhook secret.
 - Supports Meta webhook verification, signed Messenger events, and duplicate-message protection.
+- Supports an optional Botpress evaluation/customer-service layer while keeping this core authoritative.
 - Understands common Arabic quantity, colour, payment, cancellation and multi-question phrases.
 - Exposes a protected administration API and a CSRF-protected browser dashboard.
 - Tracks order status changes in an audit trail and reports revenue by currency.
@@ -36,6 +39,7 @@ and delivery questions and records confirmed customer orders.
 
 - `PRODUCTS_JSON`: Optional validated product catalog JSON.
 - `DELIVERY_JSON`: Optional validated delivery-times JSON.
+- `BOTPRESS_INTEGRATION_SECRET`: Independent secret for the optional Botpress adapter.
 - `META_GRAPH_VERSION`: Graph API version used for replies (default: `v23.0`).
 - `DB_PATH`: SQLite database path used only when `DATABASE_URL` is absent
   (default: `customer_agent.db`).
@@ -77,6 +81,15 @@ Tests also run automatically on every push and pull request.
 - `GET /webhook-info`: Telegram webhook status.
 - `GET /messenger`: Meta webhook verification endpoint.
 - `POST /messenger`: Signed Facebook Messenger message webhook.
+- `POST /integrations/botpress/message`: Secret-protected Botpress adapter endpoint.
+
+## Botpress lab
+
+The [`botpress/`](botpress/) project is an additive adapter and regression-test
+lab. It forwards messages to this Python core, which continues to own catalog
+rules, sessions, confirmation, and orders. It does not replace or copy the core.
+See [`docs/BOTPRESS_INTEGRATION.md`](docs/BOTPRESS_INTEGRATION.md) for the safety
+contract and promotion gate.
 
 ## Administration API
 

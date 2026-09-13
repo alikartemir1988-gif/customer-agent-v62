@@ -1,0 +1,28 @@
+{
+  "name": "customer-agent-botpress-lab",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Botpress evaluation and customer-service layer for Customer Agent V6.3.2",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "dev": "adk dev",
+    "build": "adk build",
+    "deploy": "adk deploy",
+    "eval": "adk evals"
+  },
+  "dependencies": {
+    "@botpress/evals": "2.0.5",
+    "@botpress/runtime": "2.0.5"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  },
+  "overrides": {
+    "axios": "1.20.0",
+    "@opentelemetry/core": "2.11.0",
+    "@opentelemetry/resources": "2.11.0",
+    "@opentelemetry/sdk-metrics": "2.11.0",
+    "@opentelemetry/sdk-trace-base": "2.11.0"
+  }
+}

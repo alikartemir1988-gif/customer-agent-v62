@@ -171,6 +171,39 @@ class OrderFlowTests(unittest.TestCase):
 
         self.assertEqual(row, (3, "حلب"))
 
+    def test_customer_can_select_color_before_confirmation(self):
+        chat_id = 117
+
+        for message in (
+            "بدي الجهاز",
+            "نور أحمد",
+            "0999123456",
+            "حلب",
+        ):
+            customer_agent.handle_message(chat_id, message)
+
+        colors = customer_agent.handle_message(
+            chat_id,
+            "شو الألوان المتوفرة؟",
+        )
+        self.assertIn("أسود", colors)
+        self.assertIn("أبيض", colors)
+        self.assertIsNone(customer_agent.session(chat_id)["color"])
+
+        review = customer_agent.handle_message(chat_id, "بدي الأبيض")
+
+        self.assertIn("اللون: أبيض", review)
+        self.assertIn("الإجمالي: 30$", review)
+        self.assertEqual(self.order_count(), 0)
+
+        confirmed = customer_agent.handle_message(chat_id, "تأكيد")
+        self.assertIn("اللون: أبيض", confirmed)
+
+        with sqlite3.connect(customer_agent.DB_PATH) as conn:
+            color = conn.execute("SELECT color FROM orders").fetchone()[0]
+
+        self.assertEqual(color, "أبيض")
+
     def test_repeated_confirmation_does_not_duplicate_order(self):
         chat_id = 103
 
@@ -252,6 +285,16 @@ class OrderFlowTests(unittest.TestCase):
                 self.assertIn("طرق الدفع المتاحة", reply)
                 self.assertIn("الدفع عند الاستلام", reply)
                 self.assertNotIn("فهمت عليك جزئياً", reply)
+
+    def test_short_phone_number_is_not_accepted(self):
+        chat_id = 118
+
+        customer_agent.handle_message(chat_id, "بدي الجهاز")
+        customer_agent.handle_message(chat_id, "نور أحمد")
+        reply = customer_agent.handle_message(chat_id, "12345")
+
+        self.assertIn("رقم الهاتف", reply)
+        self.assertIsNone(customer_agent.session(chat_id)["phone"])
 
     def test_payment_question_during_confirmation_keeps_order(self):
         chat_id = 116
@@ -348,6 +391,7 @@ class OrderFlowTests(unittest.TestCase):
             self.assertIn("ما زال جاهزاً للتأكيد", reply)
             self.assertNotIn("فهمت عليك جزئياً", reply)
             self.assertNotIn("راجع طلبك", reply)
+            self.assertIsNone(customer_agent.session(chat_id)["color"])
 
         confirmed = customer_agent.handle_message(chat_id, "تأكيد")
 

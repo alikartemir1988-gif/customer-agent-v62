@@ -10,3 +10,9 @@ venv/
 .venv/
 .pytest_cache/
 .coverage
+node_modules/
+dist/
+.adk/
+agent.local.json
+.mcp.json
+*.log
