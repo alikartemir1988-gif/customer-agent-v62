@@ -59,6 +59,15 @@ class MajdSalesBotTests(unittest.TestCase):
         post.assert_not_called()
         self.assertIn("تم تسجيل بياناتك", reply)
 
+    @patch("majd_sales_bot.requests.post")
+    @patch("majd_sales_bot.load_history", return_value=[])
+    def test_openai_failure_falls_back_to_local_sales_flow(self, _history, post):
+        post.side_effect = majd_sales_bot.requests.RequestException("quota")
+
+        reply = majd_sales_bot.ai_reply("2", "buyer", "مرحبا")
+
+        self.assertIn("وكيل العملاء V6", reply)
+
 
 if __name__ == "__main__":
     unittest.main()

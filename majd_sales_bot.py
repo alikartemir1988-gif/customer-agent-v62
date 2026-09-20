@@ -263,22 +263,28 @@ def ai_reply(chat_id, username, user_text):
     input_messages.extend(history)
     input_messages.append({"role": "user", "content": user_text})
 
-    response = requests.post(
-        "https://api.openai.com/v1/responses",
-        headers={
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": OPENAI_MODEL,
-            "input": input_messages,
-            "temperature": 0.4,
-            "max_output_tokens": 500,
-        },
-        timeout=45,
-    )
-    response.raise_for_status()
-    payload = response.json()
+    try:
+        response = requests.post(
+            "https://api.openai.com/v1/responses",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": OPENAI_MODEL,
+                "input": input_messages,
+                "temperature": 0.4,
+                "max_output_tokens": 500,
+            },
+            timeout=45,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException:
+        # Keep the sales assistant useful when API billing, quota, or network
+        # access is temporarily unavailable. Never log customer content here.
+        app.logger.warning("OpenAI unavailable; using local sales fallback")
+        return scripted_sales_reply(chat_id, user_text, username)
     text = payload.get("output_text", "").strip()
     if not text:
         for item in payload.get("output", []):
