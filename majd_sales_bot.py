@@ -15,6 +15,8 @@ app = Flask(__name__)
 BOT_TOKEN = os.environ.get("MAJD_TELEGRAM_BOT_TOKEN", "").strip()
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini").strip()
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash").strip()
 WEBHOOK_URL = os.environ.get("MAJD_WEBHOOK_URL", "").rstrip("/")
 WEBHOOK_SECRET = os.environ.get("MAJD_WEBHOOK_SECRET", "").strip()
 ADMIN_API_KEY = os.environ.get("MAJD_ADMIN_API_KEY", "").strip()
@@ -231,7 +233,74 @@ def scripted_sales_reply(chat_id, user_text, username=None):
         "الميزات، السعر، الديمو، التخصيص، أم التواصل مع المالك؟"
     )
 
+def contains_sensitive_customer_data(text):
+    value = str(text or "")
+    if __import__("re").search(r"(?<!\\d)(\\+?\\d[\\d\\s-]{7,18}\\d)(?!\\d)", value):
+        return True
+    if __import__("re").search(r"[\\w.+-]+@[\\w.-]+\\.[A-Za-z]{2,}", value):
+        return True
+    lowered = value.lower()
+    return any(term in lowered for term in (
+        "اسمي", "اسمه", "اسم الشركة", "شركتي", "رقمي", "هاتفي",
+        "بريدي", "ايميلي", "إيميلي", "تواصل معي",
+    ))
+
+
+def gemini_reply(chat_id, user_text):
+    state = SCRIPTED_STATES.get(str(chat_id), {})
+    business_type = (state.get("lead") or {}).get("business_type")
+    state_summary = (
+        f"سياق غير حساس: نوع النشاط هو {business_type}."
+        if business_type else
+        "لا توجد بعد معلومات عن نوع النشاط."
+    )
+    context = SYSTEM_PROMPT + (
+        "\nقاعدة خصوصية إلزامية: لا تطلب كلمة مرور أو رمز تحقق أو بطاقة. "
+        "عندما يريد العميل إرسال بيانات اتصال، اطلب منه إرسالها في رسالة منفصلة "
+        "كي يعالجها النظام محلياً ولا يعيد الذكاء الاصطناعي عرضها."
+    )
+    if DEMO_URL:
+        context += f"\nرابط الديمو المعتمد: {DEMO_URL}"
+
+    response = requests.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
+        headers={
+            "x-goog-api-key": GEMINI_API_KEY,
+            "Content-Type": "application/json",
+        },
+        json={
+            "systemInstruction": {"parts": [{"text": context}]},
+            "contents": [{
+                "role": "user",
+                "parts": [{"text": state_summary + "\nرسالة العميل: " + str(user_text)}],
+            }],
+            "generationConfig": {
+                "temperature": 0.4,
+                "maxOutputTokens": 600,
+            },
+        },
+        timeout=45,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    candidates = payload.get("candidates") or []
+    if not candidates:
+        raise RuntimeError("Gemini returned no candidates")
+    parts = candidates[0].get("content", {}).get("parts", [])
+    answer = "".join(str(part.get("text") or "") for part in parts).strip()
+    if not answer:
+        raise RuntimeError("Gemini returned an empty answer")
+    return answer
+
+
 def ai_reply(chat_id, username, user_text):
+    # Contact details and identifying messages never leave this service.
+    if contains_sensitive_customer_data(user_text):
+        return scripted_sales_reply(chat_id, user_text, username)
+
+    if GEMINI_API_KEY:
+        return gemini_reply(chat_id, user_text)
+
     if not OPENAI_API_KEY:
         return scripted_sales_reply(chat_id, user_text, username)
 
@@ -276,7 +345,6 @@ def health():
     missing = [
         name for name, value in {
             "MAJD_TELEGRAM_BOT_TOKEN": BOT_TOKEN,
-            "OPENAI_API_KEY": OPENAI_API_KEY,
             "MAJD_WEBHOOK_URL": WEBHOOK_URL,
             "MAJD_WEBHOOK_SECRET": WEBHOOK_SECRET,
         }.items() if not value
@@ -285,6 +353,7 @@ def health():
         "service": "majd-v6-sales-bot",
         "status": "ok" if not missing else "configuration_required",
         "missing": missing,
+        "ai_engine": "gemini-safe" if GEMINI_API_KEY else ("openai" if OPENAI_API_KEY else "scripted"),
         "time": datetime.utcnow().isoformat(timespec="seconds") + "Z",
     }), 200 if not missing else 503
 
@@ -326,6 +395,7 @@ def telegram_webhook():
         SCRIPTED_STATES[str(chat_id)] = {"last_topic": "welcome", "lead": {}}
         greeting = (
             "أهلاً بك، أنا مجد، مساعد مبيعات ذكي لوكيل العملاء V6. "
+            "أستخدم الذكاء الاصطناعي لأسئلة البيع العامة، أما بيانات الاتصال فتعالج محلياً. "
             "أستطيع شرح المنتج والديمو والتخصيص والسعر. ما نوع نشاطك؟"
         )
         save_message(chat_id, username, "assistant", greeting)
