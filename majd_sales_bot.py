@@ -24,6 +24,7 @@ OWNER_CONTACT = os.environ.get("OWNER_CONTACT", "").strip()
 
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
 MAX_HISTORY = 12
+PROCESSED_UPDATES = set()
 
 SYSTEM_PROMPT = """أنت مجد، مساعد مبيعات محترف وودود لوكيل العملاء V6.
 مهمتك فهم احتياج العميل وشرح المنتج وتحويل المهتم الجدي إلى صفقة، من دون ضغط أو ادعاءات كاذبة.
@@ -159,6 +160,15 @@ def telegram_webhook():
             return jsonify({"error": "unauthorized"}), 401
 
     update = request.get_json(silent=True) or {}
+    update_id = update.get("update_id")
+    if update_id is not None:
+        if update_id in PROCESSED_UPDATES:
+            return jsonify({"ok": True})
+        PROCESSED_UPDATES.add(update_id)
+        if len(PROCESSED_UPDATES) > 5000:
+            for old_id in sorted(PROCESSED_UPDATES)[:1000]:
+                PROCESSED_UPDATES.discard(old_id)
+
     message = update.get("message") or {}
     text = str(message.get("text") or "").strip()
     chat_id = (message.get("chat") or {}).get("id")
@@ -184,7 +194,9 @@ def telegram_webhook():
         telegram_send(chat_id, reply)
     except Exception:
         telegram_send(chat_id, "صار عطل مؤقت أثناء تجهيز الرد. حاول بعد قليل من فضلك.")
-        return jsonify({"ok": False}), 500
+        # Always acknowledge Telegram updates; a 500 makes Telegram resend the
+        # same update and causes duplicate customer-facing error messages.
+        return jsonify({"ok": True})
     return jsonify({"ok": True})
 
 @app.post("/admin/setup-webhook")
