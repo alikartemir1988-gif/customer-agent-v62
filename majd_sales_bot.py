@@ -21,12 +21,12 @@ ADMIN_API_KEY = os.environ.get("MAJD_ADMIN_API_KEY", "").strip()
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 DEMO_URL = os.environ.get("V6_DEMO_URL", "").strip()
 OWNER_CONTACT = os.environ.get("OWNER_CONTACT", "").strip()
+OWNER_CHAT_ID = os.environ.get("MAJD_OWNER_CHAT_ID", "").strip()
 
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
 MAX_HISTORY = 12
 PROCESSED_UPDATES = set()
 SCRIPTED_STATES = {}
-OWNER_CHAT_ID = None
 
 SYSTEM_PROMPT = """أنت مجد، مساعد مبيعات محترف وودود لوكيل العملاء V6.
 مهمتك فهم احتياج العميل وشرح المنتج وتحويل المهتم الجدي إلى صفقة، من دون ضغط أو ادعاءات كاذبة.
@@ -111,6 +111,16 @@ def scripted_sales_reply(chat_id, user_text, username=None):
         state["lead"]["raw"] = text
         state["lead"]["username"] = username
         state["last_topic"] = "lead_captured"
+        if OWNER_CHAT_ID and str(chat_id) != OWNER_CHAT_ID:
+            try:
+                telegram_send(
+                    OWNER_CHAT_ID,
+                    "🔔 عميل مهتم جديد بوكيل V6\n"
+                    f"Telegram: @{username or 'بدون اسم مستخدم'}\n"
+                    f"البيانات: {text}",
+                )
+            except Exception:
+                pass
         return (
             "تم تسجيل بياناتك كعميل مهتم ✅\n"
             "سيراجع المالك طلبك ويتواصل معك لمشاركة الديمو ومناقشة التخصيص والسعر النهائي. "
@@ -263,6 +273,14 @@ def telegram_webhook():
     username = sender.get("username")
 
     if not chat_id or not text:
+        return jsonify({"ok": True})
+
+    if text.startswith("/myid") or text.startswith("/register_owner"):
+        telegram_send(
+            chat_id,
+            f"رقم حسابك الداخلي هو:\n{chat_id}\n"
+            "أرسله لمجد داخل ChatGPT ليتم تسجيلك كمالك دائم.",
+        )
         return jsonify({"ok": True})
 
     if text.startswith("/start"):
