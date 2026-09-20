@@ -13,8 +13,8 @@ except ImportError:
 app = Flask(__name__)
 
 BOT_TOKEN = os.environ.get("MAJD_TELEGRAM_BOT_TOKEN", "").strip()
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini").strip()
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash").strip()
 WEBHOOK_URL = os.environ.get("MAJD_WEBHOOK_URL", "").rstrip("/")
 WEBHOOK_SECRET = os.environ.get("MAJD_WEBHOOK_SECRET", "").strip()
 ADMIN_API_KEY = os.environ.get("MAJD_ADMIN_API_KEY", "").strip()
@@ -249,49 +249,57 @@ def ai_reply(chat_id, username, user_text):
     if contains_sensitive_customer_data(user_text):
         return scripted_sales_reply(chat_id, user_text, username)
 
-    if not OPENAI_API_KEY:
+    if not GEMINI_API_KEY:
         return scripted_sales_reply(chat_id, user_text, username)
 
-    history = load_history(chat_id)
-    context = SYSTEM_PROMPT
+    state = SCRIPTED_STATES.get(str(chat_id), {})
+    business_type = (state.get("lead") or {}).get("business_type")
+    state_summary = (
+        f"سياق غير حساس: نوع النشاط هو {business_type}."
+        if business_type else
+        "لا توجد بعد معلومات عن نوع النشاط."
+    )
+    context = SYSTEM_PROMPT + (
+        "\nقاعدة خصوصية إلزامية: لا تطلب كلمة مرور أو رمز تحقق أو بطاقة. "
+        "عندما يريد العميل إرسال بيانات اتصال، اطلب منه إرسالها في رسالة منفصلة "
+        "كي يعالجها النظام محلياً ولا يعيد الذكاء الاصطناعي عرضها."
+    )
     if DEMO_URL:
         context += f"\nرابط الديمو المعتمد: {DEMO_URL}"
-    if OWNER_CONTACT:
-        context += f"\nوسيلة التواصل المعتمدة مع المالك: {OWNER_CONTACT}"
-
-    input_messages = [{"role": "system", "content": context}]
-    input_messages.extend(history)
-    input_messages.append({"role": "user", "content": user_text})
 
     try:
         response = requests.post(
-            "https://api.openai.com/v1/responses",
+            f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
             headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "x-goog-api-key": GEMINI_API_KEY,
                 "Content-Type": "application/json",
             },
             json={
-                "model": OPENAI_MODEL,
-                "input": input_messages,
-                "temperature": 0.4,
-                "max_output_tokens": 500,
+                "systemInstruction": {"parts": [{"text": context}]},
+                "contents": [{
+                    "role": "user",
+                    "parts": [{"text": state_summary + "\nرسالة العميل: " + str(user_text)}],
+                }],
+                "generationConfig": {
+                    "temperature": 0.4,
+                    "maxOutputTokens": 600,
+                },
             },
             timeout=45,
         )
         response.raise_for_status()
         payload = response.json()
     except requests.RequestException:
-        # Keep the sales assistant useful when API billing, quota, or network
-        # access is temporarily unavailable. Never log customer content here.
-        app.logger.warning("OpenAI unavailable; using local sales fallback")
+        # Free-tier limits or temporary network failures must never stop sales.
+        # Never log customer content here.
+        app.logger.warning("Gemini unavailable; using local sales fallback")
         return scripted_sales_reply(chat_id, user_text, username)
-    text = payload.get("output_text", "").strip()
-    if not text:
-        for item in payload.get("output", []):
-            for content in item.get("content", []):
-                if content.get("type") == "output_text":
-                    text += content.get("text", "")
-    return text.strip() or "أعتذر، لم أتمكن من تجهيز الرد الآن. حاول بعد قليل."
+    candidates = payload.get("candidates") or []
+    if not candidates:
+        return scripted_sales_reply(chat_id, user_text, username)
+    parts = candidates[0].get("content", {}).get("parts", [])
+    answer = "".join(str(part.get("text") or "") for part in parts).strip()
+    return answer or scripted_sales_reply(chat_id, user_text, username)
 
 @app.get("/")
 @app.get("/health")
@@ -307,7 +315,7 @@ def health():
         "service": "majd-v6-sales-bot",
         "status": "ok" if not missing else "configuration_required",
         "missing": missing,
-        "ai_engine": "openai-safe" if OPENAI_API_KEY else "scripted",
+        "ai_engine": "gemini-free-safe" if GEMINI_API_KEY else "scripted",
         "time": datetime.utcnow().isoformat(timespec="seconds") + "Z",
     }), 200 if not missing else 503
 
