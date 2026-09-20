@@ -25,6 +25,8 @@ OWNER_CONTACT = os.environ.get("OWNER_CONTACT", "").strip()
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
 MAX_HISTORY = 12
 PROCESSED_UPDATES = set()
+SCRIPTED_STATES = {}
+OWNER_CHAT_ID = None
 
 SYSTEM_PROMPT = """أنت مجد، مساعد مبيعات محترف وودود لوكيل العملاء V6.
 مهمتك فهم احتياج العميل وشرح المنتج وتحويل المهتم الجدي إلى صفقة، من دون ضغط أو ادعاءات كاذبة.
@@ -98,60 +100,91 @@ def telegram_send(chat_id, text):
     )
     response.raise_for_status()
 
-def scripted_sales_reply(user_text):
-    text = str(user_text or "").strip().lower()
+def scripted_sales_reply(chat_id, user_text, username=None):
+    text = str(user_text or "").strip()
+    lowered = text.lower()
+    state = SCRIPTED_STATES.setdefault(str(chat_id), {"last_topic": None, "lead": {}})
 
-    if any(word in text for word in ("السعر", "بكم", "قديش", "كم حق", "التكلفة")):
+    phone_match = __import__("re").search(r"(?<!\\d)(\\+?\\d[\\d\\s-]{7,18}\\d)(?!\\d)", text)
+    has_lead_details = phone_match or any(word in lowered for word in ("اسمي", "شركة", "شركتي", "مؤسسة"))
+    if has_lead_details:
+        state["lead"]["raw"] = text
+        state["lead"]["username"] = username
+        state["last_topic"] = "lead_captured"
+        return (
+            "تم تسجيل بياناتك كعميل مهتم ✅\n"
+            "سيراجع المالك طلبك ويتواصل معك لمشاركة الديمو ومناقشة التخصيص والسعر النهائي. "
+            "قبل ذلك: كم تقريباً عدد رسائل العملاء التي تستقبلها يومياً؟"
+        )
+
+    affirmative = lowered in {"نعم", "اي", "إي", "ايوه", "أيوه", "تقريبا", "تقريباً", "ضروري", "مهم"}
+    if affirmative and state.get("last_topic") == "whatsapp_required":
+        state["last_topic"] = "business_type"
+        return (
+            "واضح، سنعتبر WhatsApp متطلباً أساسياً في العرض. يحتاج ربطاً رسمياً منفصلاً "
+            "بحسب البلد ومزوّد الخدمة. ما نوع نشاطك، وكم رسالة عملاء تستقبل يومياً تقريباً؟"
+        )
+    if affirmative and state.get("last_topic") == "demo_lead":
+        state["last_topic"] = "awaiting_lead"
+        return "أرسل اسمك، اسم الشركة، البلد، ورقم الهاتف أو البريد وسأجهز طلب الديمو."
+
+    if any(word in lowered for word in ("السعر", "بكم", "قديش", "كم حق", "التكلفة")):
+        state["last_topic"] = "price"
         return (
             "سعر وكيل العملاء V6 يبدأ من 5,000 دولار أمريكي، "
             "وقد يزيد حسب القنوات والتخصيص والدعم المطلوب. "
             "ما القنوات التي تريد تشغيله عليها؟"
         )
 
-    if any(word in text for word in ("ميزات", "مميزات", "شو بيعمل", "اشرح", "تفاصيل", "شو هو")):
+    if any(word in lowered for word in ("ميزات", "مميزات", "شو بيعمل", "اشرح", "تفاصيل", "شو هو", "ماذا تقدمون")):
+        state["last_topic"] = "features"
         return (
             "وكيل العملاء V6 يرد على أسئلة العملاء، يعرض المنتجات والأسعار والتوصيل، "
-            "يجمع بيانات الطلب، ويطلب تأكيد العميل قبل الحفظ. لديه قاعدة PostgreSQL، "
-            "لوحة إدارة محمية، سجل لحالات الطلبات، Webhooks آمنة واختبارات آلية. "
+            "يجمع بيانات الطلب، ويطلب تأكيد العميل قبل الحفظ. لديه PostgreSQL، "
+            "لوحة إدارة محمية، سجل لحالات الطلبات، Webhooks آمنة واختبارات آلية، "
             "ويمكن تخصيصه حسب نشاطك. ما نوع نشاطك؟"
         )
 
-    if any(word in text for word in ("واتساب", "whatsapp")):
+    if any(word in lowered for word in ("واتساب", "whatsapp")):
+        state["last_topic"] = "whatsapp_required"
         return (
             "يمكن إضافة WhatsApp عبر تكامل رسمي منفصل حسب بلدك ومزوّد الخدمة. "
             "النسخة الحالية تعمل على Telegram، وتوجد نواة تكامل لـFacebook Messenger. "
             "هل WhatsApp شرط أساسي لمشروعك؟"
         )
 
-    if any(word in text for word in ("ديمو", "تجربة", "جرب", "رابط")):
+    if any(word in lowered for word in ("ديمو", "تجربة", "جرب", "رابط", "اعرض لي")):
         if DEMO_URL:
+            state["last_topic"] = "demo_sent"
             return f"تفضل رابط الديمو: {DEMO_URL}\nبعد التجربة أخبرني ما التخصيص المطلوب."
+        state["last_topic"] = "demo_lead"
         return (
-            "الديمو متاح، وسأطلب من المالك إرسال الرابط المعتمد لك. "
-            "اكتب اسمك، شركتك، بلدك ووسيلة التواصل المناسبة."
+            "الديمو متاح. لإرسال الرابط المعتمد اكتب اسمك، اسم الشركة، البلد، "
+            "ورقم الهاتف أو البريد المناسب للتواصل."
         )
 
-    if any(word in text for word in ("اشتري", "مهتم", "اريد", "أريد", "تواصل", "اتفاق")):
+    if any(word in lowered for word in ("اشتري", "مهتم", "اريد", "أريد", "تواصل", "اتفاق")):
+        state["last_topic"] = "awaiting_lead"
         return (
             "ممتاز. لنجهز عرضاً مناسباً: أرسل اسمك، اسم الشركة، البلد، "
             "البريد أو الهاتف، والقنوات المطلوبة. الاتفاق النهائي والدفع يتمان مع المالك."
         )
 
-    if any(word in text for word in ("مرحبا", "اهلا", "أهلا", "سلام", "hello", "hi")):
+    if any(word in lowered for word in ("مرحبا", "اهلا", "أهلا", "سلام", "hello", "hi")):
+        state["last_topic"] = "welcome"
         return (
             "أهلاً بك. أنا مجد، مساعد مبيعات لوكيل العملاء V6. "
             "هل تريد معرفة الميزات، السعر، الديمو، أم خيارات التخصيص؟"
         )
 
     return (
-        "أستطيع مساعدتك بخصوص وكيل العملاء V6: الميزات، السعر، الديمو والتخصيص. "
-        "ما نوع نشاطك، وعلى أي قناة يتواصل عملاؤك؟"
+        "فهمت. حتى أعطيك جواباً مناسباً، اختر ما تريد: "
+        "الميزات، السعر، الديمو، التخصيص، أم التواصل مع المالك؟"
     )
-
 
 def ai_reply(chat_id, username, user_text):
     if not OPENAI_API_KEY:
-        return scripted_sales_reply(user_text)
+        return scripted_sales_reply(chat_id, user_text, username)
 
     history = load_history(chat_id)
     context = SYSTEM_PROMPT
