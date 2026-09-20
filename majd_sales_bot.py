@@ -199,7 +199,23 @@ def setup_webhook():
     )
     return jsonify(response.json()), response.status_code
 
+def configure_webhook():
+    if not TELEGRAM_API or not WEBHOOK_URL or not WEBHOOK_SECRET:
+        return
+    response = requests.post(
+        f"{TELEGRAM_API}/setWebhook",
+        json={
+            "url": f"{WEBHOOK_URL}/majd/webhook",
+            "secret_token": WEBHOOK_SECRET,
+            "drop_pending_updates": False,
+        },
+        timeout=20,
+    )
+    response.raise_for_status()
+
+
 try:
     init_db()
+    configure_webhook()
 except Exception:
     pass
