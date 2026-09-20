@@ -174,6 +174,16 @@ def scripted_sales_reply(chat_id, user_text, username=None):
             "ويمكن تخصيصه حسب نشاطك. ما نوع نشاطك؟"
         )
 
+    if any(word in lowered for word in ("تخصيص", "خصص", "تفصيل", "حسب شغلي", "حسب نشاطي")):
+        state["last_topic"] = "customization"
+        business = state.get("lead", {}).get("business_type")
+        prefix = f"لنشاط «{business}» " if business else ""
+        return (
+            f"يمكن تخصيص V6 {prefix}من حيث اسم وهوية الوكيل، المنتجات والأسعار، "
+            "اللغات، أسئلة العملاء، جمع بيانات المهتمين، لوحة الإدارة والقنوات المطلوبة. "
+            "اكتب أهم ثلاث مهام تريد من الوكيل تنفيذها."
+        )
+
     if any(word in lowered for word in ("واتساب", "whatsapp")):
         state["last_topic"] = "whatsapp_required"
         return (
