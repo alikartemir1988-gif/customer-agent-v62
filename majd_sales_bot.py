@@ -106,7 +106,10 @@ def scripted_sales_reply(chat_id, user_text, username=None):
     state = SCRIPTED_STATES.setdefault(str(chat_id), {"last_topic": None, "lead": {}})
 
     phone_match = __import__("re").search(r"(?<!\\d)(\\+?\\d[\\d\\s-]{7,18}\\d)(?!\\d)", text)
-    has_lead_details = phone_match or any(word in lowered for word in ("اسمي", "شركة", "شركتي", "مؤسسة"))
+    email_match = __import__("re").search(r"[\\w.+-]+@[\\w.-]+\\.[A-Za-z]{2,}", text)
+    has_lead_details = bool(phone_match or email_match or (
+        "اسمي" in lowered and any(word in lowered for word in ("شركة", "شركتي", "مؤسسة", "بلد"))
+    ))
     if has_lead_details:
         state["lead"]["raw"] = text
         state["lead"]["username"] = username
@@ -137,6 +140,22 @@ def scripted_sales_reply(chat_id, user_text, username=None):
     if affirmative and state.get("last_topic") == "demo_lead":
         state["last_topic"] = "awaiting_lead"
         return "أرسل اسمك، اسم الشركة، البلد، ورقم الهاتف أو البريد وسأجهز طلب الديمو."
+
+    if any(phrase in lowered for phrase in ("من الاول", "من الأول", "بلش من جديد", "ابدأ من جديد", "نبدأ من جديد")):
+        SCRIPTED_STATES[str(chat_id)] = {"last_topic": "welcome", "lead": {}}
+        return (
+            "أهلاً بك من جديد. أنا مجد، مساعد مبيعات لوكيل العملاء V6. "
+            "ما نوع نشاطك؟"
+        )
+
+    if lowered in {"مالك", "المالك"} or any(
+        phrase in lowered for phrase in ("تواصل مع المالك", "احكي مع المالك", "حكي المالك")
+    ):
+        state["last_topic"] = "awaiting_lead"
+        return (
+            "لأوصلك بالمالك أرسل اسمك، اسم الشركة، البلد، "
+            "ورقم الهاتف أو البريد، وسأرسل بياناتك له مباشرة."
+        )
 
     if any(word in lowered for word in ("السعر", "بكم", "قديش", "كم حق", "التكلفة")):
         state["last_topic"] = "price"
@@ -185,6 +204,16 @@ def scripted_sales_reply(chat_id, user_text, username=None):
         return (
             "أهلاً بك. أنا مجد، مساعد مبيعات لوكيل العملاء V6. "
             "هل تريد معرفة الميزات، السعر، الديمو، أم خيارات التخصيص؟"
+        )
+
+    if state.get("last_topic") in {"welcome", "business_type"}:
+        business = text
+        state["lead"]["business_type"] = business
+        state["last_topic"] = "business_type"
+        return (
+            f"ممتاز، يمكن تخصيص V6 لنشاط «{business}» ليجيب العملاء، "
+            "يجمع بيانات المهتمين، يصنف الطلبات، ويحوّل الحالات الجدية للمالك. "
+            "على أي قناة يتواصل عملاؤك حالياً: Telegram، WhatsApp، Facebook أم غيرها؟"
         )
 
     return (
@@ -284,6 +313,7 @@ def telegram_webhook():
         return jsonify({"ok": True})
 
     if text.startswith("/start"):
+        SCRIPTED_STATES[str(chat_id)] = {"last_topic": "welcome", "lead": {}}
         greeting = (
             "أهلاً بك، أنا مجد، مساعد مبيعات ذكي لوكيل العملاء V6. "
             "أستطيع شرح المنتج والديمو والتخصيص والسعر. ما نوع نشاطك؟"
