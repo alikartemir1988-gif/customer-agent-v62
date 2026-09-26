@@ -255,13 +255,79 @@ def customer_message_span(
         )
 
 
-def finish_customer_message(span, response_text, state=None):
-    """Attach privacy-safe result metadata to a message span."""
+
+def _sales_stage(state):
+    state = state or {}
+
+    if state.get("order_id") or state.get("done"):
+        return "order_created"
+    if state.get("awaiting_confirmation"):
+        return "awaiting_confirmation"
+    if state.get("buying"):
+        return "buying"
+    return "browsing"
+
+
+def _slow_response_threshold_ms():
+    raw = _clean_env_value("LANGFUSE_SLOW_RESPONSE_MS") or "2000"
+
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = 2000
+
+    return max(100, value)
+
+
+def _normalized_response_ms(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+
+    if number < 0:
+        return None
+
+    return round(number, 1)
+
+
+def _score_trace_safely(span, name, value, data_type):
+    if span is None:
+        return
+
+    try:
+        span.score_trace(
+            name=name,
+            value=value,
+            data_type=data_type,
+        )
+    except Exception as exc:
+        LOGGER.warning(
+            "Langfuse score skipped (%s)",
+            type(exc).__name__,
+        )
+
+
+def finish_customer_message(
+    span,
+    response_text,
+    state=None,
+    response_ms=None,
+):
+    """Attach privacy-safe result, latency and sales-funnel metadata."""
 
     if span is None:
         return
 
     state = state or {}
+    response_ms = _normalized_response_ms(response_ms)
+    sales_stage = _sales_stage(state)
+    order_created = bool(state.get("order_id") or state.get("done"))
+    slow_response = (
+        response_ms is not None
+        and response_ms >= _slow_response_threshold_ms()
+    )
+
     metadata = {
         "response_character_count": len(str(response_text or "")),
         "buying": bool(state.get("buying")),
@@ -269,21 +335,160 @@ def finish_customer_message(span, response_text, state=None):
             state.get("awaiting_confirmation")
         ),
         "done": bool(state.get("done")),
-        "order_created": bool(state.get("order_id")),
+        "order_created": order_created,
+        "sales_stage": sales_stage,
+        "slow_response": slow_response,
     }
 
-    try:
-        span.update(
-            output=_content_payload(
-                response_text,
-                "reply",
-            ),
-            metadata=metadata,
+    if response_ms is not None:
+        metadata["response_ms"] = response_ms
+
+    update_kwargs = {
+        "output": _content_payload(
+            response_text,
+            "reply",
+        ),
+        "metadata": metadata,
+    }
+
+    if slow_response:
+        update_kwargs.update(
+            {
+                "level": "WARNING",
+                "status_message": (
+                    f"Slow customer response: {response_ms} ms"
+                ),
+            }
         )
+
+    try:
+        span.update(**update_kwargs)
     except Exception as exc:
         LOGGER.warning(
             "Langfuse trace update skipped (%s)",
             type(exc).__name__,
+        )
+
+    _score_trace_safely(
+        span,
+        "request_success",
+        1,
+        "BOOLEAN",
+    )
+    _score_trace_safely(
+        span,
+        "order_created",
+        1 if order_created else 0,
+        "BOOLEAN",
+    )
+    _score_trace_safely(
+        span,
+        "purchase_stage",
+        sales_stage,
+        "CATEGORICAL",
+    )
+    if response_ms is not None:
+        _score_trace_safely(
+            span,
+            "response_ms",
+            response_ms,
+            "NUMERIC",
+        )
+
+
+def fail_customer_message(
+    span,
+    exc,
+    state=None,
+    response_ms=None,
+):
+    """Mark a customer-message trace as failed without exposing secrets."""
+
+    if span is None:
+        return
+
+    state = state or {}
+    response_ms = _normalized_response_ms(response_ms)
+    sales_stage = _sales_stage(state)
+
+    metadata = {
+        "error": True,
+        "error_type": type(exc).__name__,
+        "sales_stage": sales_stage,
+        "order_created": bool(
+            state.get("order_id") or state.get("done")
+        ),
+    }
+
+    if response_ms is not None:
+        metadata["response_ms"] = response_ms
+
+    try:
+        span.update(
+            metadata=metadata,
+            level="ERROR",
+            status_message=(
+                f"Customer message failed: {type(exc).__name__}"
+            ),
+        )
+    except Exception as update_exc:
+        LOGGER.warning(
+            "Langfuse error trace update skipped (%s)",
+            type(update_exc).__name__,
+        )
+
+    _score_trace_safely(
+        span,
+        "request_success",
+        0,
+        "BOOLEAN",
+    )
+    _score_trace_safely(
+        span,
+        "purchase_stage",
+        sales_stage,
+        "CATEGORICAL",
+    )
+    if response_ms is not None:
+        _score_trace_safely(
+            span,
+            "response_ms",
+            response_ms,
+            "NUMERIC",
+        )
+
+
+def record_operational_error(context, exc, version=""):
+    """Create a privacy-safe Langfuse ERROR trace for external failures."""
+
+    client = _get_langfuse_client()
+    if client is None:
+        return
+
+    try:
+        with client.start_as_current_observation(
+            name="operational-error",
+            as_type="span",
+            metadata={
+                "context": str(context or "unknown")[:120],
+                "error_type": type(exc).__name__,
+                "contains_customer_data": False,
+            },
+            level="ERROR",
+            status_message=(
+                f"Operational failure: {type(exc).__name__}"
+            ),
+            version=str(version or "")[:80] or None,
+        ) as span:
+            span.score_trace(
+                name="request_success",
+                value=0,
+                data_type="BOOLEAN",
+            )
+    except Exception as trace_exc:
+        LOGGER.warning(
+            "Langfuse operational error trace skipped (%s)",
+            type(trace_exc).__name__,
         )
 
 
