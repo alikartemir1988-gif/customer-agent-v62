@@ -1,5 +1,5 @@
-import json
 import os
+import re
 from datetime import datetime
 
 import requests
@@ -29,6 +29,13 @@ PROCESSED_UPDATES = set()
 SCRIPTED_STATES = {}
 PUBLIC_PRICE_USD = "6,500"
 INTERNAL_FLOOR_USD = "5,000"
+CHANNEL_KEYWORDS = {
+    "Facebook": ("facebook", "فيسبوك", "فيس بوك", "مسنجر", "messenger"),
+    "WhatsApp": ("whatsapp", "واتساب", "وتساب", "واتس"),
+    "Telegram": ("telegram", "تيليغرام", "تلغرام", "تلجرام"),
+    "Instagram": ("instagram", "انستغرام", "انستا"),
+    "Website": ("website", "موقع", "الموقع", "ويب", "web"),
+}
 
 SYSTEM_PROMPT = """أنت مجد، مساعد مبيعات محترف وودود لوكيل العملاء V6.
 مهمتك فهم احتياج العميل وشرح المنتج وتحويل المهتم الجدي إلى صفقة، من دون ضغط أو ادعاءات كاذبة.
@@ -103,10 +110,38 @@ def telegram_send(chat_id, text):
     )
     response.raise_for_status()
 
+def normalize_digits(value):
+    return str(value or "").translate(str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789"))
+
+def detect_channel(text):
+    lowered = str(text or "").lower()
+    for channel, aliases in CHANNEL_KEYWORDS.items():
+        if any(alias in lowered for alias in aliases):
+            return channel
+    return None
+
+def extract_message_volume(text):
+    normalized = normalize_digits(text)
+    if not any(word in normalized.lower() for word in ("رسالة", "رسائل", "عميل", "عملاء", "message", "messages")):
+        return None
+    match = re.search(r"(?<!\d)(\d{1,6})(?!\d)", normalized)
+    return match.group(1) if match else None
+
+def is_task_request(text):
+    lowered = str(text or "").lower()
+    return any(phrase in lowered for phrase in (
+        "تنفيذ الرد", "الرد على العملاء", "جدولة المهتمين", "جدولة العملاء",
+        "جمع بيانات", "تصنيف الطلبات", "تسجيل الطلبات", "متابعة العملاء",
+        "حجز مواعيد", "تحويل الحالات", "ادارة العملاء", "إدارة العملاء",
+    ))
+
 def scripted_sales_reply(chat_id, user_text, username=None):
     text = str(user_text or "").strip()
     lowered = text.lower()
     state = SCRIPTED_STATES.setdefault(str(chat_id), {"last_topic": None, "lead": {}})
+    lead = state.setdefault("lead", {})
+    channel = detect_channel(text)
+    message_volume = extract_message_volume(text)
 
     phone_match = __import__("re").search(r"(?<!\d)(\+?\d[\d\s-]{7,18}\d)(?!\d)", text)
     email_match = __import__("re").search(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", text)
@@ -145,6 +180,50 @@ def scripted_sales_reply(chat_id, user_text, username=None):
     if affirmative and state.get("last_topic") == "demo_lead":
         state["last_topic"] = "awaiting_lead"
         return "أرسل اسمك، اسم الشركة، البلد، ورقم الهاتف أو البريد وسأجهز طلب الديمو."
+
+    if channel:
+        lead["channel"] = channel
+        state["last_topic"] = "channel_selected"
+        if channel == "Facebook":
+            channel_note = "يمكن تجهيز V6 لفيسبوك/ماسنجر ضمن التخصيص، وقد يحتاج ربطاً رسمياً حسب صفحة النشاط."
+        elif channel == "WhatsApp":
+            channel_note = "يمكن تجهيز WhatsApp ضمن التخصيص عبر تكامل رسمي حسب البلد ومزوّد الخدمة."
+        elif channel == "Telegram":
+            channel_note = "Telegram مدعوم حالياً ويمكن تشغيله بسرعة."
+        else:
+            channel_note = f"يمكن اعتماد {channel} ضمن التخصيص."
+        if lead.get("volume"):
+            return (
+                f"تمام، سجّلت القناة الأساسية: {channel}. {channel_note}\n"
+                f"وحجم الرسائل التقريبي: {lead['volume']} يومياً. "
+                "الخطوة التالية: أرسل اسمك، اسم الشركة، البلد، ورقم الهاتف أو البريد لأرسلها للمالك مع المتطلبات."
+            )
+        return (
+            f"تمام، سجّلت القناة الأساسية: {channel}. {channel_note}\n"
+            "كم تقريباً عدد رسائل العملاء التي تستقبلها يومياً؟"
+        )
+
+    if message_volume:
+        lead["volume"] = message_volume
+        state["last_topic"] = "volume_captured"
+        if lead.get("channel"):
+            return (
+                f"ممتاز، {message_volume} رسالة يومياً على {lead['channel']} حجم مناسب جداً لوكيل V6. "
+                "الوكيل يستطيع الرد على الأسئلة المتكررة، جمع بيانات المهتمين، وتصنيف الحالات الجدية للمالك. "
+                "لإكمال العرض أرسل اسمك، اسم الشركة، البلد، ورقم الهاتف أو البريد."
+            )
+        return (
+            f"ممتاز، {message_volume} رسالة يومياً حجم مناسب لوكيل V6. "
+            "على أي قناة تأتيك هذه الرسائل غالباً: Facebook، WhatsApp، Telegram، الموقع، أم غيرها؟"
+        )
+
+    if is_task_request(text):
+        state["last_topic"] = "task_requirements"
+        return (
+            "نعم، يمكن تجهيز V6 لتنفيذ الرد على العملاء، جمع بيانات المهتمين، تصنيف الطلبات، "
+            "وجدولة الحالات الجدية للمالك. نضبطه حسب نشاطك وقناتك الأساسية. "
+            "ما القناة الأساسية وعدد الرسائل اليومي تقريباً؟"
+        )
 
     if any(phrase in lowered for phrase in ("كتبت هذه المعلومات", "كتبت المعلومات", "ارسلت المعلومات", "أرسلت المعلومات", "موجودة سابقا", "موجودة سابقاً")):
         state["last_topic"] = "lead_acknowledged"
@@ -250,7 +329,7 @@ def scripted_sales_reply(chat_id, user_text, username=None):
 
     if state.get("last_topic") in {"welcome", "business_type"}:
         business = text
-        state["lead"]["business_type"] = business
+        lead["business_type"] = business
         state["last_topic"] = "business_type"
         return (
             f"ممتاز، يمكن تخصيص V6 لنشاط «{business}» ليجيب العملاء، "
@@ -268,13 +347,16 @@ def should_use_local_sales_reply(user_text):
     lowered = str(user_text or "").strip().lower()
     if not lowered:
         return True
+    if detect_channel(lowered) or extract_message_volume(lowered) or is_task_request(lowered):
+        return True
     local_terms = (
         "السعر", "سعر", "بكم", "قديش", "كم حق", "التكلفة", "تكلفته", "كم سعره",
         "سرعة", "سرعته", "سريع", "بطئ", "بطيء", "كم ثانية", "ثواني",
         "ديمو", "تجربة", "جرب", "رابط", "اعرض لي",
         "من هو المالك", "مين المالك", "صاحب المشروع", "مالك المشروع",
         "تواصل مع المالك", "احكي مع المالك", "حكي المالك", "مالك", "المالك",
-        "واتساب", "whatsapp",
+        "واتساب", "whatsapp", "facebook", "فيسبوك", "فيس بوك", "messenger", "مسنجر",
+        "telegram", "تيليغرام", "تلغرام", "تلجرام", "instagram", "انستغرام", "انستا",
         "تخصيص", "خصص", "تفصيل", "حسب شغلي", "حسب نشاطي",
         "اشتري", "مهتم", "اريد", "أريد", "تواصل", "اتفاق",
         "ميزات", "مميزات", "شو بيعمل", "اشرح", "تفاصيل", "شو هو", "ماذا تقدمون",
