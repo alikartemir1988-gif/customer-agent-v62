@@ -60,6 +60,8 @@ class MajdSalesBotTests(unittest.TestCase):
 
         post.assert_not_called()
         self.assertIn("تم تسجيل بياناتك", reply)
+        self.assertIn("customer-agent-v6-demo.onrender.com", reply)
+        self.assertNotIn("لمشاركة الديمو", reply)
 
     @patch("majd_sales_bot.requests.post")
     def test_price_question_is_local_and_uses_public_price(self, post):
