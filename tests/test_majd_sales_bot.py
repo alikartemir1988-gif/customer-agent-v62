@@ -77,6 +77,20 @@ class MajdSalesBotTests(unittest.TestCase):
         self.assertIn("ثوان", reply)
 
     @patch("majd_sales_bot.requests.post")
+    def test_demo_request_returns_demo_url_directly(self, post):
+        reply = majd_sales_bot.ai_reply("1", "buyer", "اريد رابط الديمو")
+
+        post.assert_not_called()
+        self.assertIn("customer-agent-v6-demo.onrender.com", reply)
+
+    @patch("majd_sales_bot.requests.post")
+    def test_owner_question_is_local_and_clear(self, post):
+        reply = majd_sales_bot.ai_reply("1", "buyer", "من هو المالك")
+
+        post.assert_not_called()
+        self.assertIn("المسؤول عن الاتفاق النهائي", reply)
+
+    @patch("majd_sales_bot.requests.post")
     @patch("majd_sales_bot.load_history", return_value=[])
     def test_gemini_failure_falls_back_to_local_sales_flow(self, _history, post):
         post.side_effect = majd_sales_bot.requests.RequestException("quota")
