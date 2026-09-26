@@ -12,6 +12,7 @@ import majd_sales_bot
 
 class MajdSalesBotTests(unittest.TestCase):
     def setUp(self):
+        majd_sales_bot.SCRIPTED_STATES.clear()
         self.client = majd_sales_bot.app.test_client()
 
     def test_rejects_wrong_webhook_secret(self):
@@ -91,6 +92,35 @@ class MajdSalesBotTests(unittest.TestCase):
 
         post.assert_not_called()
         self.assertIn("المسؤول عن الاتفاق النهائي", reply)
+
+    @patch("majd_sales_bot.requests.post")
+    def test_channel_answer_advances_conversation_without_repeating_prompt(self, post):
+        majd_sales_bot.ai_reply("flow", "buyer", "تجارة")
+        reply = majd_sales_bot.ai_reply("flow", "buyer", "Facebook")
+
+        post.assert_not_called()
+        self.assertIn("سجّلت القناة الأساسية: Facebook", reply)
+        self.assertIn("عدد رسائل العملاء", reply)
+        self.assertNotIn("على أي قناة", reply)
+
+    @patch("majd_sales_bot.requests.post")
+    def test_volume_answer_after_channel_advances_to_lead_capture(self, post):
+        majd_sales_bot.ai_reply("flow", "buyer", "تجارة")
+        majd_sales_bot.ai_reply("flow", "buyer", "Facebook")
+        reply = majd_sales_bot.ai_reply("flow", "buyer", "تقريباً 700 رسالة")
+
+        post.assert_not_called()
+        self.assertIn("700 رسالة يومياً", reply)
+        self.assertIn("أرسل اسمك", reply)
+        self.assertNotIn("اختر ما تريد", reply)
+
+    @patch("majd_sales_bot.requests.post")
+    def test_task_request_is_understood_as_sales_requirement(self, post):
+        reply = majd_sales_bot.ai_reply("1", "buyer", "تنفيذ الرد على العملاء وجدولة المهتمين")
+
+        post.assert_not_called()
+        self.assertIn("تنفيذ الرد على العملاء", reply)
+        self.assertIn("جدولة الحالات الجدية", reply)
 
     @patch("majd_sales_bot.requests.post")
     @patch("majd_sales_bot.load_history", return_value=[])
