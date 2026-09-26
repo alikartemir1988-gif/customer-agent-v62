@@ -19,7 +19,7 @@ WEBHOOK_URL = os.environ.get("MAJD_WEBHOOK_URL", "").rstrip("/")
 WEBHOOK_SECRET = os.environ.get("MAJD_WEBHOOK_SECRET", "").strip()
 ADMIN_API_KEY = os.environ.get("MAJD_ADMIN_API_KEY", "").strip()
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
-DEMO_URL = os.environ.get("V6_DEMO_URL", "").strip()
+DEMO_URL = os.environ.get("V6_DEMO_URL", "https://customer-agent-v6-demo.onrender.com").strip()
 OWNER_CONTACT = os.environ.get("OWNER_CONTACT", "").strip()
 OWNER_CHAT_ID = os.environ.get("MAJD_OWNER_CHAT_ID", "").strip()
 
@@ -144,6 +144,13 @@ def scripted_sales_reply(chat_id, user_text, username=None):
         state["last_topic"] = "awaiting_lead"
         return "أرسل اسمك، اسم الشركة، البلد، ورقم الهاتف أو البريد وسأجهز طلب الديمو."
 
+    if any(phrase in lowered for phrase in ("كتبت هذه المعلومات", "كتبت المعلومات", "ارسلت المعلومات", "أرسلت المعلومات", "موجودة سابقا", "موجودة سابقاً")):
+        state["last_topic"] = "lead_acknowledged"
+        return (
+            "تمام، إذا كانت بياناتك أُرسلت سابقاً فسنكمل عليها. "
+            "اختر الآن ما تريد: رابط الديمو، السعر، التخصيص، أم التواصل مع المالك؟"
+        )
+
     if any(phrase in lowered for phrase in ("من الاول", "من الأول", "بلش من جديد", "ابدأ من جديد", "نبدأ من جديد")):
         SCRIPTED_STATES[str(chat_id)] = {"last_topic": "welcome", "lead": {}}
         return (
@@ -151,13 +158,24 @@ def scripted_sales_reply(chat_id, user_text, username=None):
             "ما نوع نشاطك؟"
         )
 
-    if lowered in {"مالك", "المالك"} or any(
-        phrase in lowered for phrase in ("تواصل مع المالك", "احكي مع المالك", "حكي المالك")
+    if any(
+        phrase in lowered for phrase in (
+            "من هو المالك", "مين المالك", "صاحب المشروع", "مالك المشروع",
+            "تواصل مع المالك", "احكي مع المالك", "حكي المالك",
+        )
     ):
         state["last_topic"] = "awaiting_lead"
+        contact_hint = f" وسيلة التواصل المعتمدة: {OWNER_CONTACT}." if OWNER_CONTACT else ""
         return (
-            "لأوصلك بالمالك أرسل اسمك، اسم الشركة، البلد، "
-            "ورقم الهاتف أو البريد، وسأرسل بياناتك له مباشرة."
+            "المالك هو صاحب وكيل العملاء V6 والمسؤول عن الاتفاق النهائي والدفع والتسليم."
+            f"{contact_hint} إذا أردت أن يتواصل معك، أرسل اسمك، اسم الشركة، البلد، ورقم الهاتف أو البريد."
+        )
+
+    if lowered in {"مالك", "المالك"}:
+        state["last_topic"] = "owner"
+        return (
+            "هل تريد معرفة معلومات المالك أم تريد التواصل معه؟ "
+            "إذا تريد التواصل، أرسل اسمك، اسم الشركة، البلد، ورقم الهاتف أو البريد."
         )
 
     if any(word in lowered for word in ("السعر", "سعر", "بكم", "قديش", "كم حق", "التكلفة", "تكلفته", "كم سعره")):
@@ -252,6 +270,7 @@ def should_use_local_sales_reply(user_text):
         "السعر", "سعر", "بكم", "قديش", "كم حق", "التكلفة", "تكلفته", "كم سعره",
         "سرعة", "سرعته", "سريع", "بطئ", "بطيء", "كم ثانية", "ثواني",
         "ديمو", "تجربة", "جرب", "رابط", "اعرض لي",
+        "من هو المالك", "مين المالك", "صاحب المشروع", "مالك المشروع",
         "تواصل مع المالك", "احكي مع المالك", "حكي المالك", "مالك", "المالك",
         "واتساب", "whatsapp",
         "تخصيص", "خصص", "تفصيل", "حسب شغلي", "حسب نشاطي",
@@ -259,6 +278,8 @@ def should_use_local_sales_reply(user_text):
         "ميزات", "مميزات", "شو بيعمل", "اشرح", "تفاصيل", "شو هو", "ماذا تقدمون",
         "مرحبا", "اهلا", "أهلا", "سلام", "hello", "hi",
         "من الاول", "من الأول", "بلش من جديد", "ابدأ من جديد", "نبدأ من جديد",
+        "كتبت هذه المعلومات", "كتبت المعلومات", "ارسلت المعلومات", "أرسلت المعلومات",
+        "موجودة سابقا", "موجودة سابقاً",
     )
     return any(term in lowered for term in local_terms)
 
