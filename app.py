@@ -5,13 +5,19 @@ import math
 import os
 import re
 import sqlite3
+import time
 from datetime import datetime
 from functools import wraps
 
 import requests
 from flask import Flask, jsonify, request
 
-from observability import customer_message_span, finish_customer_message
+from observability import (
+    customer_message_span,
+    fail_customer_message,
+    finish_customer_message,
+    record_operational_error,
+)
 
 try:
     import psycopg
@@ -2302,6 +2308,7 @@ def handle_message(
 ):
 
     channel = str(source or "unknown")
+    started_at = time.perf_counter()
 
     with customer_message_span(
         chat_id,
@@ -2319,13 +2326,30 @@ def handle_message(
                 text,
             )
 
+            response_ms = (
+                time.perf_counter() - started_at
+            ) * 1000
+
             finish_customer_message(
                 trace_span,
                 answer,
                 SESSIONS.get(str(chat_id)),
+                response_ms=response_ms,
             )
 
             return answer
+        except Exception as exc:
+            response_ms = (
+                time.perf_counter() - started_at
+            ) * 1000
+
+            fail_customer_message(
+                trace_span,
+                exc,
+                SESSIONS.get(str(chat_id)),
+                response_ms=response_ms,
+            )
+            raise
         finally:
             state = SESSIONS.get(
                 str(chat_id)
@@ -2358,6 +2382,11 @@ def telegram_api(method, **data):
 def log_external_failure(context, exc):
 
     print(f"{context}: {type(exc).__name__}")
+    record_operational_error(
+        context,
+        exc,
+        version=APP_VERSION,
+    )
 
 
 def messenger_signature_is_valid(raw_body, signature):
