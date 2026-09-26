@@ -62,6 +62,21 @@ class MajdSalesBotTests(unittest.TestCase):
         self.assertIn("تم تسجيل بياناتك", reply)
 
     @patch("majd_sales_bot.requests.post")
+    def test_price_question_is_local_and_uses_public_price(self, post):
+        reply = majd_sales_bot.ai_reply("1", "buyer", "كم سعره")
+
+        post.assert_not_called()
+        self.assertIn("6,500", reply)
+        self.assertNotIn("5,000", reply)
+
+    @patch("majd_sales_bot.requests.post")
+    def test_speed_question_is_local_and_direct(self, post):
+        reply = majd_sales_bot.ai_reply("1", "buyer", "ما سرعته")
+
+        post.assert_not_called()
+        self.assertIn("ثوان", reply)
+
+    @patch("majd_sales_bot.requests.post")
     @patch("majd_sales_bot.load_history", return_value=[])
     def test_gemini_failure_falls_back_to_local_sales_flow(self, _history, post):
         post.side_effect = majd_sales_bot.requests.RequestException("quota")
