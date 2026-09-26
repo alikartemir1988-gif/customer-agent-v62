@@ -27,6 +27,8 @@ TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
 MAX_HISTORY = 12
 PROCESSED_UPDATES = set()
 SCRIPTED_STATES = {}
+PUBLIC_PRICE_USD = "6,500"
+INTERNAL_FLOOR_USD = "5,000"
 
 SYSTEM_PROMPT = """أنت مجد، مساعد مبيعات محترف وودود لوكيل العملاء V6.
 مهمتك فهم احتياج العميل وشرح المنتج وتحويل المهتم الجدي إلى صفقة، من دون ضغط أو ادعاءات كاذبة.
@@ -41,7 +43,8 @@ SYSTEM_PROMPT = """أنت مجد، مساعد مبيعات محترف وودود
 - الاستضافة الحالية على Render والكود على GitHub.
 
 قواعد البيع:
-- السعر المستهدف يبدأ من 5,000 دولار أمريكي، وقد يزيد حسب التخصيص والتكامل والدعم.
+- السعر المعلن للعملاء الجدد هو 6,500 دولار أمريكي، وقد يزيد حسب التخصيص والتكامل والدعم.
+- لا تذكر سعر 5,000 دولار للعميل. هذا حد داخلي للتفاوض مع المالك فقط.
 - لا تمنح خصماً ولا تعد بسعر نهائي أقل من 5,000 دولار.
 - لا تدّع وجود ميزة غير مذكورة. قل بوضوح إن أي قناة إضافية مثل WhatsApp تحتاج تكاملاً رسمياً منفصلاً.
 - اسأل أسئلة قصيرة عن نشاط العميل، عدد الرسائل، القنوات، اللغات، والتكاملات المطلوبة.
@@ -157,12 +160,21 @@ def scripted_sales_reply(chat_id, user_text, username=None):
             "ورقم الهاتف أو البريد، وسأرسل بياناتك له مباشرة."
         )
 
-    if any(word in lowered for word in ("السعر", "بكم", "قديش", "كم حق", "التكلفة")):
+    if any(word in lowered for word in ("السعر", "سعر", "بكم", "قديش", "كم حق", "التكلفة", "تكلفته", "كم سعره")):
         state["last_topic"] = "price"
         return (
-            "سعر وكيل العملاء V6 يبدأ من 5,000 دولار أمريكي، "
-            "وقد يزيد حسب القنوات والتخصيص والدعم المطلوب. "
-            "ما القنوات التي تريد تشغيله عليها؟"
+            f"سعر وكيل العملاء V6 هو {PUBLIC_PRICE_USD} دولار أمريكي كبداية، "
+            "ويشمل الكود الكامل، إعداد النشر، لوحة الإدارة، والتخصيص الأولي. "
+            "قد يزيد السعر إذا احتجت قنوات أو تكاملات إضافية. "
+            "هل تريد رابط الديمو أم شرح ما يشمله السعر؟"
+        )
+
+    if any(word in lowered for word in ("سرعة", "سرعته", "سريع", "بطئ", "بطيء", "كم ثانية", "ثواني")):
+        state["last_topic"] = "speed"
+        return (
+            "سرعة الرد تعتمد على القناة والاستضافة ومزود الذكاء الاصطناعي، "
+            "لكن غالباً يرد خلال ثوانٍ قليلة. على Render المجاني قد يتأخر أول رد إذا كانت الخدمة نائمة، "
+            "وبعد الاستيقاظ تصبح الردود أسرع. للتشغيل التجاري يمكن تحسين السرعة بخطة استضافة أقوى."
         )
 
     if any(word in lowered for word in ("ميزات", "مميزات", "شو بيعمل", "اشرح", "تفاصيل", "شو هو", "ماذا تقدمون")):
@@ -231,6 +243,25 @@ def scripted_sales_reply(chat_id, user_text, username=None):
         "الميزات، السعر، الديمو، التخصيص، أم التواصل مع المالك؟"
     )
 
+def should_use_local_sales_reply(user_text):
+    """Keep high-value sales intents deterministic instead of sending them to AI."""
+    lowered = str(user_text or "").strip().lower()
+    if not lowered:
+        return True
+    local_terms = (
+        "السعر", "سعر", "بكم", "قديش", "كم حق", "التكلفة", "تكلفته", "كم سعره",
+        "سرعة", "سرعته", "سريع", "بطئ", "بطيء", "كم ثانية", "ثواني",
+        "ديمو", "تجربة", "جرب", "رابط", "اعرض لي",
+        "تواصل مع المالك", "احكي مع المالك", "حكي المالك", "مالك", "المالك",
+        "واتساب", "whatsapp",
+        "تخصيص", "خصص", "تفصيل", "حسب شغلي", "حسب نشاطي",
+        "اشتري", "مهتم", "اريد", "أريد", "تواصل", "اتفاق",
+        "ميزات", "مميزات", "شو بيعمل", "اشرح", "تفاصيل", "شو هو", "ماذا تقدمون",
+        "مرحبا", "اهلا", "أهلا", "سلام", "hello", "hi",
+        "من الاول", "من الأول", "بلش من جديد", "ابدأ من جديد", "نبدأ من جديد",
+    )
+    return any(term in lowered for term in local_terms)
+
 def contains_sensitive_customer_data(text):
     value = str(text or "")
     if __import__("re").search(r"(?<!\d)(\+?\d[\d\s-]{7,18}\d)(?!\d)", value):
@@ -247,6 +278,9 @@ def contains_sensitive_customer_data(text):
 def ai_reply(chat_id, username, user_text):
     # Contact details and identifying messages never leave this service.
     if contains_sensitive_customer_data(user_text):
+        return scripted_sales_reply(chat_id, user_text, username)
+
+    if should_use_local_sales_reply(user_text):
         return scripted_sales_reply(chat_id, user_text, username)
 
     if not GEMINI_API_KEY:
