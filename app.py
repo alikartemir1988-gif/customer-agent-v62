@@ -16,7 +16,9 @@ from observability import (
     customer_message_span,
     fail_customer_message,
     finish_customer_message,
+    flush_observability,
     record_operational_error,
+    verify_langfuse_connection,
 )
 
 try:
@@ -3076,7 +3078,71 @@ def messenger_webhook():
     return jsonify({"ok": True})
 
 
+
+def run_langfuse_smoke_tests():
+    """Run synthetic, privacy-safe Langfuse checks when explicitly enabled."""
+
+    enabled = os.environ.get(
+        "LANGFUSE_RUN_SMOKE_TESTS",
+        "",
+    ).strip().lower() in {"1", "true", "yes", "on"}
+
+    if not enabled:
+        return
+
+    try:
+        verify_langfuse_connection()
+
+        with customer_message_span(
+            "smoke-normal",
+            "synthetic-normal-message",
+            "smoke-test",
+            version=APP_VERSION,
+        ) as span:
+            finish_customer_message(
+                span,
+                "synthetic-normal-reply",
+                {
+                    "buying": False,
+                    "awaiting_confirmation": False,
+                    "done": False,
+                    "order_id": None,
+                },
+                response_ms=125.0,
+            )
+
+        with customer_message_span(
+            "smoke-purchase",
+            "synthetic-purchase-message",
+            "smoke-test",
+            version=APP_VERSION,
+        ) as span:
+            finish_customer_message(
+                span,
+                "synthetic-purchase-reply",
+                {
+                    "buying": False,
+                    "awaiting_confirmation": False,
+                    "done": True,
+                    "order_id": "synthetic",
+                },
+                response_ms=420.0,
+            )
+
+        flush_observability()
+        print(
+            "Langfuse smoke tests passed: "
+            "normal message + synthetic purchase"
+        )
+    except Exception as exc:
+        print(
+            "Langfuse smoke tests failed: "
+            f"{type(exc).__name__}"
+        )
+
+
 init_db()
+run_langfuse_smoke_tests()
 
 
 if __name__ == "__main__":
