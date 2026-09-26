@@ -492,6 +492,25 @@ def record_operational_error(context, exc, version=""):
         )
 
 
+def flush_observability():
+    """Flush pending Langfuse events for short-lived or smoke-test flows."""
+
+    client = _get_langfuse_client()
+    if client is None:
+        return False
+
+    try:
+        client.flush()
+        return True
+    except Exception as exc:
+        LOGGER.warning(
+            "Langfuse flush skipped (%s)",
+            type(exc).__name__,
+        )
+        return False
+
+
+
 def verify_langfuse_connection():
     """Strict CI-only credential check followed by one synthetic trace."""
 
