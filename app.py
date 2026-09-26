@@ -2559,6 +2559,95 @@ def health():
     )
 
 
+@app.get("/internal/langfuse-smoke")
+def langfuse_smoke_endpoint():
+
+    expected_token = os.environ.get(
+        "LANGFUSE_SMOKE_TOKEN",
+        "",
+    ).strip()
+
+    provided_token = request.args.get(
+        "token",
+        "",
+    ).strip()
+
+    if (
+        not expected_token
+        or not hmac.compare_digest(
+            provided_token,
+            expected_token,
+        )
+    ):
+        return jsonify(
+            {
+                "ok": False,
+                "error": "not found",
+            }
+        ), 404
+
+    try:
+        verify_langfuse_connection()
+
+        with customer_message_span(
+            "smoke-normal",
+            "synthetic-normal-message",
+            "smoke-test",
+            version=APP_VERSION,
+        ) as span:
+            finish_customer_message(
+                span,
+                "synthetic-normal-reply",
+                {
+                    "buying": False,
+                    "awaiting_confirmation": False,
+                    "done": False,
+                    "order_id": None,
+                },
+                response_ms=125.0,
+            )
+
+        with customer_message_span(
+            "smoke-purchase",
+            "synthetic-purchase-message",
+            "smoke-test",
+            version=APP_VERSION,
+        ) as span:
+            finish_customer_message(
+                span,
+                "synthetic-purchase-reply",
+                {
+                    "buying": False,
+                    "awaiting_confirmation": False,
+                    "done": True,
+                    "order_id": "synthetic",
+                },
+                response_ms=420.0,
+            )
+
+        flushed = flush_observability()
+
+        return jsonify(
+            {
+                "ok": True,
+                "normal_trace": True,
+                "purchase_trace": True,
+                "flushed": bool(flushed),
+            }
+        )
+    except Exception as exc:
+        log_external_failure(
+            "Langfuse smoke endpoint failed",
+            exc,
+        )
+        return jsonify(
+            {
+                "ok": False,
+                "error": type(exc).__name__,
+            }
+        ), 500
+
+
 @app.get("/health")
 def service_health():
 
@@ -3142,7 +3231,6 @@ def run_langfuse_smoke_tests():
 
 
 init_db()
-run_langfuse_smoke_tests()
 
 
 if __name__ == "__main__":
