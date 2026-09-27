@@ -2,14 +2,27 @@
 
 
 def post_worker_init(worker):
-    """Keep Telegram's webhook aligned with the deployed secret."""
+    """Keep Telegram's webhook aligned and run optional diagnostics."""
+
+    import os
+    import threading
 
     from app import (
         BOT_TOKEN,
         WEBHOOK_SECRET,
         WEBHOOK_URL,
         register_webhook,
+        run_langfuse_smoke_tests,
     )
+
+    if os.environ.get("LANGFUSE_RUN_SMOKE_TESTS", "").strip().lower() in (
+        "1", "true", "yes", "on"
+    ):
+        threading.Thread(
+            target=run_langfuse_smoke_tests,
+            name="langfuse-deploy-smoke",
+            daemon=True,
+        ).start()
 
     if not (BOT_TOKEN and WEBHOOK_URL and WEBHOOK_SECRET):
         return
