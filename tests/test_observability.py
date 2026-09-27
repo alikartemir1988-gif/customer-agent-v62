@@ -161,6 +161,88 @@ class ObservabilityTests(unittest.TestCase):
             ) as span:
                 self.assertIsNone(span)
 
+    def test_smoke_delivery_reads_actual_project_and_both_spans(self):
+        project_response = mock.Mock(status_code=200)
+        project_response.json.return_value = {
+            "data": [{
+                "id": "project-123",
+                "name": "My Project",
+                "organization": {"name": "My Organization"},
+            }],
+        }
+        observations_response = mock.Mock(status_code=200)
+        observations_response.json.return_value = {
+            "data": [
+                {"name": "customer-message", "metadata": {
+                    "source": "smoke-test-run-1",
+                    "sales_stage": "browsing",
+                }},
+                {"name": "customer-message", "metadata": {
+                    "source": "smoke-test-run-1",
+                    "sales_stage": "order_created",
+                }},
+                {"name": "customer-message", "metadata": {
+                    "source": "another-run",
+                    "sales_stage": "order_created",
+                }},
+            ],
+        }
+        env = {
+            "LANGFUSE_BASE_URL": "https://us.cloud.langfuse.com",
+            "LANGFUSE_PUBLIC_KEY": "public",
+            "LANGFUSE_SECRET_KEY": "secret",
+        }
+        with mock.patch.dict(os.environ, env, clear=True):
+            with mock.patch.object(
+                observability.requests,
+                "get",
+                side_effect=[project_response, observations_response],
+            ) as get:
+                result = observability.inspect_langfuse_smoke_delivery(
+                    "smoke-test-run-1", "2026-09-27T22:00:00Z"
+                )
+
+        self.assertEqual(result["project_name"], "My Project")
+        self.assertEqual(result["project_id"], "project-123")
+        self.assertTrue(result["normal_seen"])
+        self.assertTrue(result["purchase_seen"])
+        self.assertEqual(get.call_args_list[0].kwargs["auth"],
+                         ("public", "secret"))
+        self.assertEqual(get.call_args_list[1].kwargs["params"]["name"],
+                         "customer-message")
+
+    def test_smoke_delivery_does_not_count_unrelated_spans(self):
+        project_response = mock.Mock(status_code=200)
+        project_response.json.return_value = {"data": [{
+            "id": "project-123",
+            "name": "My Project",
+            "organization": {"name": "My Organization"},
+        }]}
+        observations_response = mock.Mock(status_code=200)
+        observations_response.json.return_value = {"data": [{
+            "name": "customer-message", "metadata": {
+                "source": "previous-run",
+                "sales_stage": "order_created",
+            },
+        }]}
+        env = {
+            "LANGFUSE_BASE_URL": "https://us.cloud.langfuse.com",
+            "LANGFUSE_PUBLIC_KEY": "public",
+            "LANGFUSE_SECRET_KEY": "secret",
+        }
+        with mock.patch.dict(os.environ, env, clear=True):
+            with mock.patch.object(
+                observability.requests,
+                "get",
+                side_effect=[project_response, observations_response],
+            ):
+                result = observability.inspect_langfuse_smoke_delivery(
+                    "this-run", "2026-09-27T22:00:00Z"
+                )
+
+        self.assertFalse(result["normal_seen"])
+        self.assertFalse(result["purchase_seen"])
+
 
 if __name__ == "__main__":
     unittest.main()

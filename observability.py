@@ -5,7 +5,10 @@ import hmac
 import logging
 import os
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
+
+import requests
 
 
 LOGGER = logging.getLogger(__name__)
@@ -552,3 +555,60 @@ def verify_langfuse_connection():
 
     client.flush()
     return True
+
+
+def inspect_langfuse_smoke_delivery(source, started_at):
+    """Read the configured project and the two synthetic observations."""
+
+    base_url = _normalized_base_url()
+    auth = (
+        _clean_env_value("LANGFUSE_PUBLIC_KEY"),
+        _clean_env_value("LANGFUSE_SECRET_KEY"),
+    )
+    project_response = requests.get(
+        f"{base_url}/api/public/projects",
+        auth=auth,
+        timeout=10,
+        allow_redirects=False,
+    )
+    if project_response.status_code != 200:
+        raise RuntimeError("Langfuse project lookup failed")
+
+    projects = project_response.json().get("data", [])
+    if len(projects) != 1:
+        raise RuntimeError("Langfuse project lookup was ambiguous")
+
+    project = projects[0]
+    to_start_time = (
+        datetime.now(timezone.utc) + timedelta(minutes=1)
+    ).isoformat().replace("+00:00", "Z")
+    observations_response = requests.get(
+        f"{base_url}/api/public/v2/observations",
+        auth=auth,
+        params={
+            "fromStartTime": started_at,
+            "toStartTime": to_start_time,
+            "name": "customer-message",
+            "fields": "core,basic,metadata",
+            "limit": 100,
+        },
+        timeout=10,
+        allow_redirects=False,
+    )
+    if observations_response.status_code != 200:
+        raise RuntimeError("Langfuse observations lookup failed")
+
+    stages = {
+        row.get("metadata", {}).get("sales_stage")
+        for row in observations_response.json().get("data", [])
+        if row.get("name") == "customer-message"
+        and isinstance(row.get("metadata"), dict)
+        and row["metadata"].get("source") == source
+    }
+    return {
+        "project_name": project.get("name", ""),
+        "organization_name": project.get("organization", {}).get("name", ""),
+        "project_id": project.get("id", ""),
+        "normal_seen": "browsing" in stages,
+        "purchase_seen": "order_created" in stages,
+    }

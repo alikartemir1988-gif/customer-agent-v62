@@ -6,7 +6,8 @@ import os
 import re
 import sqlite3
 import time
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
 from functools import wraps
 
 import requests
@@ -17,6 +18,7 @@ from observability import (
     fail_customer_message,
     finish_customer_message,
     flush_observability,
+    inspect_langfuse_smoke_delivery,
     record_operational_error,
     verify_langfuse_connection,
 )
@@ -3169,7 +3171,7 @@ def messenger_webhook():
 
 
 def run_langfuse_smoke_tests():
-    """Run synthetic, privacy-safe Langfuse checks when explicitly enabled."""
+    """Run and verify synthetic checks after an explicit one-off deploy."""
 
     enabled = os.environ.get(
         "LANGFUSE_RUN_SMOKE_TESTS",
@@ -3180,14 +3182,20 @@ def run_langfuse_smoke_tests():
         return
 
     try:
+        source = f"smoke-test-{uuid.uuid4().hex[:16]}"
+        started_at = datetime.now(timezone.utc).isoformat().replace(
+            "+00:00", "Z"
+        )
         verify_langfuse_connection()
 
         with customer_message_span(
             "smoke-normal",
             "synthetic-normal-message",
-            "smoke-test",
+            source,
             version=APP_VERSION,
         ) as span:
+            if span is None:
+                raise RuntimeError("Langfuse normal span was not created")
             finish_customer_message(
                 span,
                 "synthetic-normal-reply",
@@ -3203,9 +3211,11 @@ def run_langfuse_smoke_tests():
         with customer_message_span(
             "smoke-purchase",
             "synthetic-purchase-message",
-            "smoke-test",
+            source,
             version=APP_VERSION,
         ) as span:
+            if span is None:
+                raise RuntimeError("Langfuse purchase span was not created")
             finish_customer_message(
                 span,
                 "synthetic-purchase-reply",
@@ -3218,15 +3228,33 @@ def run_langfuse_smoke_tests():
                 response_ms=420.0,
             )
 
-        flush_observability()
+        if not flush_observability():
+            raise RuntimeError("Langfuse flush did not complete")
+
+        result = None
+        for attempt in range(7):
+            result = inspect_langfuse_smoke_delivery(
+                source, started_at
+            )
+            if result["normal_seen"] and result["purchase_seen"]:
+                break
+            if attempt < 6:
+                time.sleep(5)
+
         print(
-            "Langfuse smoke tests passed: "
-            "normal message + synthetic purchase"
+            "Langfuse smoke delivery: "
+            f"organization={result['organization_name']!r} "
+            f"project={result['project_name']!r} "
+            f"project_id={result['project_id']!r} "
+            f"normal_seen={result['normal_seen']} "
+            f"purchase_seen={result['purchase_seen']}",
+            flush=True,
         )
     except Exception as exc:
         print(
             "Langfuse smoke tests failed: "
-            f"{type(exc).__name__}"
+            f"{type(exc).__name__}",
+            flush=True,
         )
 
 
