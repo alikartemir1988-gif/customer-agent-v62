@@ -6,6 +6,8 @@ and delivery questions and records confirmed customer orders.
 ## Current behavior
 
 - Answers product, price, and delivery questions in Arabic.
+- Optionally uses Gemini for open Telegram questions. Catalog answers and order
+  confirmation stay in the local sales flow; contact details are not sent to Gemini.
 - Collects product, optional colour, quantity, name, phone, and city.
 - Shows a complete order review before saving.
 - Saves only after the customer writes `تأكيد`, `نعم`, or another supported confirmation.
@@ -43,6 +45,10 @@ and delivery questions and records confirmed customer orders.
 - `BOTPRESS_INTEGRATION_SECRET`: Independent secret for the optional Botpress adapter.
 - `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL`: Optional Langfuse connection values.
 - `LANGFUSE_TRACING_ENVIRONMENT`: Trace environment such as `production` or `staging`.
+- `GEMINI_API_KEY`: Optional Gemini API key stored as a Render secret. Without it,
+  Telegram uses the local replies. A free-tier key is subject to Google quotas.
+- `GEMINI_MODEL`: Defaults to `gemini-2.5-flash-lite`. Set it only to a model
+  available to the project's free tier if billing must remain disabled.
 - `LANGFUSE_CAPTURE_CONTENT`: Defaults to `false`; enable only for synthetic or consented conversations.
 - `META_GRAPH_VERSION`: Graph API version used for replies (default: `v23.0`).
 - `DB_PATH`: SQLite database path used only when `DATABASE_URL` is absent
@@ -80,6 +86,7 @@ Tests also run automatically on every push and pull request.
 ## Health checks
 
 - `GET /`: lightweight liveness and deployed version.
+  Its `ai_engine` field is `gemini` when the key is configured, otherwise `local`.
 - `GET /health`: database and merchant-configuration health.
 - `GET /ready`: production readiness, including required secrets and HTTPS webhook.
 - `GET /webhook-info`: Telegram webhook status.
