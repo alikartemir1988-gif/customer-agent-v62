@@ -47,7 +47,7 @@ and delivery questions and records confirmed customer orders.
 - `LANGFUSE_TRACING_ENVIRONMENT`: Trace environment such as `production` or `staging`.
 - `GEMINI_API_KEY`: Optional Gemini API key stored as a Render secret. Without it,
   Telegram uses the local replies. A free-tier key is subject to Google quotas.
-- `GEMINI_MODEL`: Defaults to `gemini-2.5-flash-lite`. Set it only to a model
+- `GEMINI_MODEL`: Defaults to `gemini-3.5-flash-lite`. Set it only to a model
   available to the project's free tier if billing must remain disabled.
 - `LANGFUSE_CAPTURE_CONTENT`: Defaults to `false`; enable only for synthetic or consented conversations.
 - `META_GRAPH_VERSION`: Graph API version used for replies (default: `v23.0`).
