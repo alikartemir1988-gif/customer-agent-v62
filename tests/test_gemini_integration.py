@@ -25,12 +25,14 @@ class GeminiIntegrationTests(unittest.TestCase):
         return response
 
     def test_open_telegram_question_uses_gemini_with_catalog(self):
+        response = self.gemini_response("ما عندي معلومة مؤكدة عن الضمان.")
         with (
             mock.patch.object(customer_agent, "GEMINI_API_KEY", "test-key"),
+            mock.patch.object(customer_agent, "GEMINI_MODEL", "gemini-3.5-flash-lite"),
             mock.patch.object(
                 customer_agent.requests,
                 "post",
-                return_value=self.gemini_response("ما عندي معلومة مؤكدة عن الضمان."),
+                return_value=response,
             ) as post,
         ):
             answer = customer_agent.handle_message(
@@ -38,6 +40,13 @@ class GeminiIntegrationTests(unittest.TestCase):
             )
 
         self.assertEqual(answer, "ما عندي معلومة مؤكدة عن الضمان.")
+        response.raise_for_status.assert_called_once_with()
+        self.assertEqual(
+            post.call_args.args[0],
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            "gemini-3.5-flash-lite:generateContent",
+        )
+        self.assertEqual(post.call_args.kwargs["timeout"], (3, 12))
         self.assertIn("الجهاز", post.call_args.kwargs["json"]["systemInstruction"]["parts"][0]["text"])
         self.assertEqual(post.call_args.kwargs["headers"]["x-goog-api-key"], "test-key")
         self.assertEqual(
@@ -85,6 +94,42 @@ class GeminiIntegrationTests(unittest.TestCase):
             )
 
         self.assertIn("جرب اسألني", answer)
+
+    def test_missing_key_keeps_local_reply_without_remote_request(self):
+        with (
+            mock.patch.object(customer_agent, "GEMINI_API_KEY", ""),
+            mock.patch.object(customer_agent.requests, "post") as post,
+        ):
+            answer = customer_agent.handle_message(
+                "gemini-no-key", "في ضمان؟", source="telegram"
+            )
+
+        self.assertIn("جرب اسألني", answer)
+        post.assert_not_called()
+
+    def test_invalid_key_or_unavailable_model_keeps_local_reply(self):
+        for status, chat_id, model in (
+            (401, "gemini-bad-key", "gemini-3.5-flash-lite"),
+            (404, "gemini-bad-model", "gemini-unavailable"),
+        ):
+            with self.subTest(status=status):
+                response = self.gemini_response("This must not be used")
+                response.status_code = status
+                response.raise_for_status.side_effect = requests.HTTPError(
+                    f"{status}", response=response
+                )
+                with (
+                    mock.patch.object(customer_agent, "GEMINI_API_KEY", "test-key"),
+                    mock.patch.object(customer_agent, "GEMINI_MODEL", model),
+                    mock.patch.object(customer_agent.requests, "post", return_value=response),
+                ):
+                    answer = customer_agent.handle_message(
+                        chat_id, "في ضمان؟", source="telegram"
+                    )
+
+                self.assertIn("جرب اسألني", answer)
+                response.raise_for_status.assert_called_once_with()
+                response.json.assert_not_called()
 
     def test_gemini_cannot_claim_an_order_was_registered(self):
         with (
