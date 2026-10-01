@@ -131,6 +131,19 @@ class GeminiIntegrationTests(unittest.TestCase):
                 response.raise_for_status.assert_called_once_with()
                 response.json.assert_not_called()
 
+    def test_unexpected_success_payload_keeps_local_reply(self):
+        response = mock.Mock()
+        response.json.return_value = {"candidates": [{"content": None}]}
+        with (
+            mock.patch.object(customer_agent, "GEMINI_API_KEY", "test-key"),
+            mock.patch.object(customer_agent.requests, "post", return_value=response),
+        ):
+            answer = customer_agent.handle_message(
+                "gemini-bad-payload", "في ضمان؟", source="telegram"
+            )
+
+        self.assertIn("جرب اسألني", answer)
+
     def test_gemini_cannot_claim_an_order_was_registered(self):
         with (
             mock.patch.object(customer_agent, "GEMINI_API_KEY", "test-key"),
