@@ -1956,7 +1956,7 @@ def gemini_reply(text):
         ):
             return None
         return answer[:3500] or None
-    except (requests.RequestException, ValueError, TypeError, IndexError) as exc:
+    except (requests.RequestException, ValueError, TypeError, IndexError, AttributeError) as exc:
         # Free-tier limits and outages must not block Telegram replies.
         # Never log customer text, response bodies, or the API key.
         app.logger.warning("Gemini unavailable (%s); using local reply", type(exc).__name__)
