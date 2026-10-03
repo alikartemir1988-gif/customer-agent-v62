@@ -109,6 +109,8 @@ def telegram_send(chat_id, text):
         timeout=20,
     )
     response.raise_for_status()
+    if response.json().get("ok") is not True:
+        raise requests.RequestException("Telegram rejected sendMessage")
 
 def normalize_digits(value):
     return str(value or "").translate(str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789"))
@@ -124,7 +126,7 @@ def extract_message_volume(text):
     normalized = normalize_digits(text)
     if not any(word in normalized.lower() for word in ("رسالة", "رسائل", "عميل", "عملاء", "message", "messages")):
         return None
-    match = re.search(r"(?<!\d)(\d{1,6})(?!\d)", normalized)
+    match = re.search(r"(?<![\w.])(\d{1,6})(?![\w.])", normalized)
     return match.group(1) if match else None
 
 def is_task_request(text):
@@ -152,7 +154,8 @@ def scripted_sales_reply(chat_id, user_text, username=None):
         state["lead"]["raw"] = text
         state["lead"]["username"] = username
         state["last_topic"] = "lead_captured"
-        if OWNER_CHAT_ID and str(chat_id) != OWNER_CHAT_ID:
+        owner_notified = False
+        if OWNER_CHAT_ID:
             try:
                 telegram_send(
                     OWNER_CHAT_ID,
@@ -161,12 +164,21 @@ def scripted_sales_reply(chat_id, user_text, username=None):
                     f"البيانات: {text}\n"
                     f"رابط الديمو الذي شاهده/سيشاهده: {DEMO_URL}",
                 )
+                owner_notified = True
+                app.logger.info("Owner notification accepted by Telegram")
             except Exception:
-                pass
+                app.logger.warning("Owner notification failed")
+        else:
+            app.logger.warning("Owner notification unavailable: missing MAJD_OWNER_CHAT_ID")
+        notification_text = (
+            "أُرسل طلبك للمالك لمراجعة التخصيص والاتفاق النهائي. "
+            if owner_notified else
+            "تعذّر إرسال إشعار للمالك حالياً؛ حاول لاحقاً أو تواصل معه مباشرة. "
+        )
         return (
             "تم تسجيل بياناتك كعميل مهتم ✅\n"
             f"رابط الديمو: {DEMO_URL}\n"
-            "وصل طلبك للمالك لمراجعة التخصيص والاتفاق النهائي. "
+            f"{notification_text}"
             "بعد تجربة الديمو، كم تقريباً عدد رسائل العملاء التي تستقبلها يومياً؟"
         )
 
@@ -180,6 +192,28 @@ def scripted_sales_reply(chat_id, user_text, username=None):
     if affirmative and state.get("last_topic") == "demo_lead":
         state["last_topic"] = "awaiting_lead"
         return "أرسل اسمك، اسم الشركة، البلد، ورقم الهاتف أو البريد وسأجهز طلب الديمو."
+
+    wants_price = any(word in lowered for word in (
+        "السعر", "سعر", "بكم", "قديش", "كم حق", "التكلفة", "تكلفته", "كم سعره",
+    ))
+    wants_demo = any(word in lowered for word in (
+        "ديمو", "تجربة", "جرب", "رابط", "اعرض لي",
+    ))
+    if wants_price or wants_demo:
+        state["last_topic"] = "price" if wants_price else "demo_sent"
+        parts = []
+        if wants_price:
+            parts.append(
+                f"سعر وكيل العملاء V6 هو {PUBLIC_PRICE_USD} دولار أمريكي كبداية، "
+                "ويشمل الكود الكامل، إعداد النشر، لوحة الإدارة، والتخصيص الأولي. "
+                "قد يزيد السعر حسب التخصيص والتكاملات."
+            )
+        if wants_demo:
+            parts.append(
+                f"تفضل رابط الديمو: {DEMO_URL}"
+                if DEMO_URL else "الديمو غير متاح حالياً؛ تواصل مع المالك للحصول عليه."
+            )
+        return "\n".join(parts)
 
     if channel:
         lead["channel"] = channel
