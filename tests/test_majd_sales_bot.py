@@ -11,6 +11,46 @@ import majd_sales_bot
 
 
 class MajdSalesBotTests(unittest.TestCase):
+    def test_version_number_is_not_message_volume(self):
+        for text in ("كم سعر وكيل العملاء V6؟", "وكيل العملاء v٦", "Client messages V6"):
+            self.assertIsNone(majd_sales_bot.extract_message_volume(text))
+        self.assertEqual(majd_sales_bot.extract_message_volume("٧٠٠ رسالة يومياً"), "700")
+
+    @patch("majd_sales_bot.requests.post")
+    def test_combined_price_and_demo(self, post):
+        reply = majd_sales_bot.ai_reply("combined", "buyer", "كم سعر وكيل العملاء V6؟ وبدي رابط الديمو لأجربه.")
+        post.assert_not_called()
+        self.assertIn("6,500", reply)
+        self.assertIn(majd_sales_bot.DEMO_URL, reply)
+        self.assertNotIn("6 رسالة", reply)
+
+    @patch("majd_sales_bot.OWNER_CHAT_ID", "owner")
+    @patch("majd_sales_bot.telegram_send")
+    def test_owner_can_test_own_notification(self, send):
+        reply = majd_sales_bot.scripted_sales_reply("owner", "بريدي test@example.com", "tester")
+        send.assert_called_once()
+        self.assertEqual(send.call_args.args[0], "owner")
+        self.assertIn("أُرسل طلبك للمالك", reply)
+
+    @patch("majd_sales_bot.OWNER_CHAT_ID", "owner")
+    @patch("majd_sales_bot.telegram_send", side_effect=RuntimeError("failed"))
+    def test_failed_notification_is_not_claimed_sent(self, send):
+        reply = majd_sales_bot.scripted_sales_reply("buyer", "بريدي test@example.com")
+        self.assertIn("تعذّر إرسال", reply)
+        self.assertNotIn("أُرسل طلبك", reply)
+        self.assertNotIn("وصل طلبك", reply)
+
+    @patch("majd_sales_bot.OWNER_CHAT_ID", "")
+    def test_missing_owner_is_not_claimed_sent(self):
+        reply = majd_sales_bot.scripted_sales_reply("buyer", "بريدي test@example.com")
+        self.assertIn("تعذّر إرسال", reply)
+
+    @patch("majd_sales_bot.requests.post")
+    def test_telegram_rejected_payload_raises(self, post):
+        post.return_value.json.return_value = {"ok": False}
+        with self.assertRaises(majd_sales_bot.requests.RequestException):
+            majd_sales_bot.telegram_send("owner", "test")
+
     def setUp(self):
         majd_sales_bot.SCRIPTED_STATES.clear()
         self.client = majd_sales_bot.app.test_client()
@@ -96,6 +136,7 @@ class MajdSalesBotTests(unittest.TestCase):
     @patch("majd_sales_bot.requests.post")
     def test_channel_answer_advances_conversation_without_repeating_prompt(self, post):
         majd_sales_bot.ai_reply("flow", "buyer", "تجارة")
+        post.reset_mock()
         reply = majd_sales_bot.ai_reply("flow", "buyer", "Facebook")
 
         post.assert_not_called()
@@ -106,6 +147,7 @@ class MajdSalesBotTests(unittest.TestCase):
     @patch("majd_sales_bot.requests.post")
     def test_volume_answer_after_channel_advances_to_lead_capture(self, post):
         majd_sales_bot.ai_reply("flow", "buyer", "تجارة")
+        post.reset_mock()
         majd_sales_bot.ai_reply("flow", "buyer", "Facebook")
         reply = majd_sales_bot.ai_reply("flow", "buyer", "تقريباً 700 رسالة")
 
