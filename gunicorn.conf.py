@@ -5,7 +5,11 @@ def post_worker_init(worker):
     """Keep Telegram's webhook aligned and run optional diagnostics."""
 
     import os
+    import sys
     import threading
+
+    if "demo_app" in sys.modules:
+        return
 
     from app import (
         BOT_TOKEN,

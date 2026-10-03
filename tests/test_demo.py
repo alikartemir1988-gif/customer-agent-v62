@@ -1,0 +1,109 @@
+import os
+from pathlib import Path
+import runpy
+import sys
+import tempfile
+import unittest
+from unittest.mock import Mock, patch
+
+_TEST_DIR = tempfile.TemporaryDirectory()
+os.environ.setdefault("DB_PATH", os.path.join(_TEST_DIR.name, "demo.db"))
+
+import app as customer_agent
+from demo_app import demo_app
+
+
+class DemoAppTests(unittest.TestCase):
+
+    def setUp(self):
+        customer_agent.SESSIONS.clear()
+        demo_app.config.update(
+            TESTING=True,
+            SESSION_COOKIE_SECURE=False,
+        )
+        self.client = demo_app.test_client()
+
+    def send(self, message):
+        return self.client.post(
+            "/api/message",
+            json={"message": message},
+        )
+
+    def test_demo_home_and_health(self):
+        home = self.client.get("/")
+        health = self.client.get("/health")
+
+        self.assertEqual(home.status_code, 200)
+        self.assertIn("وكيل العملاء V6", home.get_data(as_text=True))
+        self.assertTrue(health.get_json()["ok"])
+        self.assertFalse(health.get_json()["data_persistence"])
+
+    def test_health_identifies_the_deployed_commit(self):
+        commit = "25906c1e28acfed7fa4a3d0cbdb5e1e162858be6"
+        with patch.object(customer_agent, "GIT_COMMIT", commit):
+            self.assertEqual(self.client.get("/health").get_json()["commit"], commit)
+
+    def test_demo_does_not_persist_conversation_details(self):
+        with patch.object(customer_agent, "save_session") as save:
+            self.send("بدي جهازين")
+            self.send("أحمد خالد")
+            self.send("0999999999")
+            self.send("دمشق")
+            self.send("تأكيد")
+        save.assert_not_called()
+
+    def test_demo_uses_real_conversation_flow_without_saving_order(self):
+        original_create_order = customer_agent.create_order
+
+        def fail_if_called(*_args, **_kwargs):
+            raise AssertionError("demo must not persist orders")
+
+        customer_agent.create_order = fail_if_called
+        try:
+            self.assertIn("شو اسمك", self.send("بدي جهازين").get_json()["reply"])
+            self.send("أحمد خالد")
+            self.send("0999999999")
+            review = self.send("دمشق").get_json()["reply"]
+            confirmed = self.send("تأكيد").get_json()["reply"]
+        finally:
+            customer_agent.create_order = original_create_order
+
+        self.assertIn("راجع طلبك", review)
+        self.assertIn("تم تسجيل طلبك", confirmed)
+        self.assertIn("DEMO-", confirmed)
+
+    def test_demo_rejects_empty_messages(self):
+        response = self.send("   ")
+        self.assertEqual(response.status_code, 400)
+
+    def test_demo_worker_never_registers_the_production_webhook(self):
+        hook = runpy.run_path(
+            str(Path(__file__).resolve().parents[1] / "gunicorn.conf.py")
+        )["post_worker_init"]
+        with (
+            patch.object(customer_agent, "BOT_TOKEN", "test-bot-token"),
+            patch.object(customer_agent, "WEBHOOK_URL", "https://example.invalid"),
+            patch.object(customer_agent, "WEBHOOK_SECRET", "test-webhook-secret"),
+            patch.object(customer_agent, "register_webhook") as register,
+        ):
+            hook(Mock())
+        register.assert_not_called()
+
+    def test_production_worker_still_registers_its_webhook(self):
+        hook = runpy.run_path(
+            str(Path(__file__).resolve().parents[1] / "gunicorn.conf.py")
+        )["post_worker_init"]
+        with (
+            patch.dict(sys.modules),
+            patch.object(customer_agent, "BOT_TOKEN", "test-bot-token"),
+            patch.object(customer_agent, "WEBHOOK_URL", "https://example.invalid"),
+            patch.object(customer_agent, "WEBHOOK_SECRET", "test-webhook-secret"),
+            patch.object(customer_agent, "register_webhook", return_value={"ok": True}) as register,
+        ):
+            sys.modules.pop("demo_app", None)
+            hook(Mock())
+        register.assert_called_once_with()
+
+
+if __name__ == "__main__":
+    unittest.main()
