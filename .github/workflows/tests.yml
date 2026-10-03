@@ -33,12 +33,13 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Compile application
-        run: python -m py_compile app.py dashboard.py
+        run: python -m py_compile app.py dashboard.py demo_app.py
 
       - name: Validate production entry points
         run: |
           python -m gunicorn --check-config app:app
           python -m gunicorn --check-config dashboard:dashboard_app
+          python -m gunicorn --check-config demo_app:demo_app
 
       - name: Run tests
         run: python -m unittest discover -s tests -v

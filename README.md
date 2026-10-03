@@ -132,3 +132,20 @@ Orders, processed Telegram updates, and conversation sessions use PostgreSQL
 when `DATABASE_URL` is configured, and otherwise fall back to SQLite for local
 development. Render's default filesystem is ephemeral, so production should
 always have `DATABASE_URL` linked to the managed PostgreSQL instance.
+
+## Public web demo
+
+The web demo uses the same sales core as the Telegram service:
+
+```bash
+gunicorn --workers 1 --bind 0.0.0.0:$PORT demo_app:demo_app
+```
+
+- `GET /` opens the interactive demo.
+- `GET /health` includes the full deployed Render commit.
+- `POST /api/message` and `POST /api/reset` operate a browser demo session.
+- Demo orders and conversation details are not persisted, and the demo worker
+  does not register the production Telegram webhook.
+
+Use `main` for both Render services to keep future releases aligned.
+
