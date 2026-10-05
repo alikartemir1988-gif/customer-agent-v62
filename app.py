@@ -54,7 +54,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
 DB_PATH = os.environ.get("DB_PATH", "customer_agent.db").strip()
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
-APP_VERSION = "6.4.0"
+APP_VERSION = "6.4.1"
 GIT_COMMIT = os.environ.get("RENDER_GIT_COMMIT", "").strip()
 
 API = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
@@ -1978,9 +1978,11 @@ def support_handoff_reply(chat_id, text, state, source):
     english = bool(re.search(r"[A-Za-z]", text)) and not re.search(r"[\u0600-\u06ff]", text)
     requested = n in {"موظف", "موظف بشري", "human", "agent", "speak to a human"} or contains_any(
         text, ["احكي مع موظف", "احكي مع شخص", "بدي موظف", "اكلم موظف", "التحدث مع موظف",
+               "موظف لطلب متابعة", "موظف للمتابعة", "طلب موظف", "طلب متابعة من موظف",
                "speak to a person", "talk to a human", "talk to an agent", "human agent"]
     )
-    if contains_any(text, ["ما بدي موظف", "لا اريد موظف", "don't want a human", "do not want a human"]):
+    if contains_any(text, ["ما بدي موظف", "لا اريد موظف", "ما بدي طلب موظف", "لا اريد طلب موظف",
+                           "don't want a human", "do not want a human"]):
         requested = False
     ticket_id = state.get("support_ticket_id")
     if ticket_id and n in {"ارجع للبوت", "عوده للبوت", "resume bot", "back to bot"}:
@@ -2448,7 +2450,7 @@ def _handle_message(
 
     support_store.count("unknown_questions", source or "direct")
     return (
-        "ما عندي إجابة مؤكدة عن هالسؤال. اكتب: موظف لطلب متابعة.\n"
+        "ما عندي إجابة مؤكدة عن هالسؤال. اكتب «موظف» لطلب متابعة.\n"
         "جرب اسألني مثلاً:\n"
         "• شو المنتجات؟\n"
         "• كم سعر الجهاز؟\n"
