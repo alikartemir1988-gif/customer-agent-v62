@@ -420,6 +420,76 @@ class OrderFlowTests(unittest.TestCase):
         self.assertIn("ما زال جاهزاً للتأكيد", reply)
         self.assertNotIn("فهمت عليك جزئياً", reply)
 
+    def test_compound_price_colors_and_unknown_warranty_covers_every_part(self):
+        for source in ("telegram", "messenger", "demo"):
+            with self.subTest(source=source):
+                reply = customer_agent.handle_message(
+                    f"compound-{source}",
+                    "كم سعر الجهاز، وشو الألوان المتوفرة، وهل عليه ضمان سنتين؟",
+                    source=source,
+                )
+                self.assertIn("30$", reply)
+                self.assertIn("أسود", reply)
+                self.assertIn("أبيض", reply)
+                self.assertIn("الضمان", reply)
+                self.assertIn("معلومة معتمدة", reply)
+                self.assertEqual(self.order_count(), 0)
+
+    def test_compound_quantity_quote_and_delivery_cost_keep_pending_order(self):
+        chat_id = "compound-pending"
+        state = customer_agent.session(chat_id)
+        state.update({
+            "buying": True, "product": "الجهاز", "qty": 1,
+            "name": "اختبار محلي", "phone": "0933123456",
+        })
+        before = dict(state)
+        reply = customer_agent.handle_message(
+            chat_id,
+            "كم حق قطعتين من الجهاز بدون خصم؟ وهل التوصيل مجاني؟",
+        )
+        self.assertIn("60$", reply)
+        self.assertIn("رسوم التوصيل", reply)
+        self.assertIn("معلومة معتمدة", reply)
+        self.assertEqual(state, before)
+        self.assertEqual(self.order_count(), 0)
+
+    def test_delivery_inquiry_does_not_change_a_reviewed_order(self):
+        chat_id = "compound-review"
+        state = customer_agent.session(chat_id)
+        state.update({
+            "buying": True, "awaiting_confirmation": True,
+            "product": "الجهاز", "qty": 3, "city": "دمشق",
+            "name": "اختبار محلي", "phone": "0933123456",
+        })
+        before = dict(state)
+        reply = customer_agent.handle_message(
+            chat_id,
+            "كم سعر الجهاز وشو الألوان المتوفرة والتوصيل إلى الحسكة؟",
+        )
+        self.assertIn("30$", reply)
+        self.assertIn("2-4 أيام", reply)
+        self.assertIn("ما زال جاهزاً للتأكيد", reply)
+        self.assertEqual(state, before)
+        self.assertEqual(self.order_count(), 0)
+
+    def test_warranty_duration_is_not_a_product_quantity(self):
+        reply = customer_agent.handle_message(
+            "compound-years",
+            "كم سعر الجهاز وهل عليه ضمان 2 سنوات؟",
+        )
+        self.assertIn("30$", reply)
+        self.assertNotIn("60$", reply)
+        self.assertIn("الضمان", reply)
+
+    def test_information_followup_remembers_product_without_starting_order(self):
+        chat_id = "compound-followup"
+        customer_agent.handle_message(chat_id, "كم سعر الجهاز؟")
+        reply = customer_agent.handle_message(chat_id, "شو الألوان المتوفرة؟")
+        self.assertIn("ألوان الجهاز", reply)
+        self.assertIn("أسود", reply)
+        self.assertFalse(customer_agent.session(chat_id)["buying"])
+        self.assertEqual(self.order_count(), 0)
+
     def test_color_and_payment_questions_work_without_order(self):
         chat_id = 109
 

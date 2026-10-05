@@ -54,7 +54,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
 DB_PATH = os.environ.get("DB_PATH", "customer_agent.db").strip()
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
-APP_VERSION = "6.4.1"
+APP_VERSION = "6.4.2"
 GIT_COMMIT = os.environ.get("RENDER_GIT_COMMIT", "").strip()
 
 API = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
@@ -1336,10 +1336,78 @@ def product_for_answer(state, detected_product=None):
     return None
 
 
-def product_information_answers(text, state, detected_product=None):
+def quote_quantity(text):
+    """Read a quoted item count, not warranty years or a claimed price."""
+    n = norm(text)
+    if re.search(r"\b(?:قطعتين|جهازين|منتجين)\b", n):
+        return 2
+    match = re.search(
+        r"\b(\d+|واحد|واحده|اثنين|اتنين|ثلاث|ثلاثه|اربع|اربعه|خمس|خمسه)"
+        r"\s+(?:قطعه|قطع|جهاز|اجهزه|منتج|منتجات)(?:\s|$)",
+        n,
+    )
+    if not match:
+        return 1
+    token = match.group(1)
+    qty = int(token) if token.isdecimal() else detect_quantity(match.group(0))
+    return qty if 1 <= qty <= 1_000_000 else None
+
+
+def reviewed_policy_answer(text, source, terms):
+    """Match only a complete policy question; never infer a merchant policy."""
+    entries = DEMO_FAQS if source == "demo" else support_store.faqs(approved_only=True)
+    for clause in re.split(r"[؟?،,؛;\n]", text):
+        clause = re.sub(r"^\s*و(?=هل\b|شو\b|كم\b|في\b)", "", clause).strip()
+        if contains_any(clause, terms):
+            answer = find_reviewed_answer(clause, entries)
+            if answer:
+                support_store.count("faq_answers", source or "direct")
+                return answer
+    return None
+
+
+def product_information_answers(text, state, detected_product=None, source=None):
 
     selected = product_for_answer(state, detected_product)
     answers = []
+
+    if is_price_question(text) and not is_buy_intent(text):
+        if selected:
+            product_name, data = selected
+            answers.append(f"سعر {product_name} هو {money_text(data['price'])}{data['currency']} ✅")
+            qty = quote_quantity(text)
+            if qty is None:
+                answers.append("حدد كمية بين 1 و1000000 لحساب الإجمالي.")
+            elif qty > 1:
+                total = data["price"] * qty
+                if math.isfinite(total):
+                    answers.append(
+                        f"إجمالي {qty} قطع: {money_text(total)}{data['currency']} "
+                        "قبل رسوم التوصيل ودون احتساب أي خصم."
+                    )
+                else:
+                    answers.append("تعذر حساب الإجمالي؛ يحتاج مراجعة المتجر.")
+        else:
+            answers.append("لأي منتج تريد السعر؟ " + "، ".join(PRODUCTS))
+
+    delivery_cost = is_delivery_question(text) and contains_any(
+        text, ["مجاني", "مجانا", "رسوم", "تكلفة", "كلفة", "أجرة"]
+    )
+    if is_delivery_question(text) and not is_buy_intent(text):
+        city = detect_city(text)
+        if not delivery_cost or contains_any(text, ["مدة", "خلال", "متى", "أيام", "ساعة"]):
+            if city in DELIVERY:
+                answers.append(f"التوصيل إلى {city}: {DELIVERY[city]} 🚚")
+            elif city:
+                answers.append(f"مدة التوصيل إلى {city} غير محددة؛ تحتاج تأكيد المتجر.")
+            else:
+                answers.append("لأي مدينة تريد معرفة مدة التوصيل؟")
+        if delivery_cost:
+            terms = ["توصيل", "شحن"]
+            answers.append(
+                reviewed_policy_answer(text, source, terms)
+                or "رسوم التوصيل: ما عندي معلومة معتمدة تؤكد أنها مجانية؛ تحتاج تأكيد المتجر."
+            )
 
     if is_color_question(text):
         if selected:
@@ -1382,6 +1450,22 @@ def product_information_answers(text, state, detected_product=None):
                 + ("، ".join(methods) if methods else "غير محددة حالياً")
                 + "."
             )
+
+    # A composite answer must acknowledge policy parts even when they are unknown.
+    # Standalone open questions still use reviewed FAQs and the existing AI fallback.
+    if answers:
+        policies = [
+            ("الضمان", ["ضمان", "كفالة"]),
+            ("الإرجاع والاستبدال", ["إرجاع", "استرجاع", "استبدال"]),
+        ]
+        if not contains_any(text, ["بدون خصم", "بلا خصم", "من غير خصم"]):
+            policies.append(("الخصم", ["خصم", "تخفيض"]))
+        for title, terms in policies:
+            if contains_any(text, terms):
+                answers.append(
+                    reviewed_policy_answer(text, source, terms)
+                    or f"{title}: ما عندي معلومة معتمدة عنه؛ يحتاج تأكيد المتجر."
+                )
 
     return answers
 
@@ -2032,6 +2116,24 @@ def _handle_message(
     if handoff:
         return handoff
 
+    n = norm(text)
+    product = detect_product(text)
+    cancelling = n in {"الغاء", "الغي"} or contains_any(
+        text, ["الغاء الطلب", "الغي الطلب", "ابدأ من جديد", "بداية جديدة"]
+    )
+    if not is_buy_intent(text) and not cancelling and n not in CONFIRM_WORDS | EDIT_WORDS:
+        information_answers = product_information_answers(text, state, product, source)
+        if information_answers:
+            if product and not state["buying"] and not state["done"]:
+                state["product"] = product[0]
+            reply = "\n".join(information_answers)
+            if state["awaiting_confirmation"]:
+                reply += (
+                    "\n\nطلبك ما زال جاهزاً للتأكيد؛ "
+                    "اكتب: تأكيد لإكماله، أو تعديل لتغييره."
+                )
+            return reply
+
     # -----------------------------------------
     # Capture useful information
     # -----------------------------------------
@@ -2125,14 +2227,8 @@ def _handle_message(
             f"{state['order_id']}"
         )
 
-    information_answers = product_information_answers(
-        text,
-        state,
-        product,
-    )
-
     # Catalog answers and explicit order confirmation stay authoritative.
-    if not information_answers and not is_buy_intent(text) and n not in CONFIRM_WORDS | EDIT_WORDS:
+    if not is_buy_intent(text) and n not in CONFIRM_WORDS | EDIT_WORDS:
         entries = DEMO_FAQS if source == "demo" else support_store.faqs(approved_only=True)
         faq_answer = find_reviewed_answer(text, entries)
         if faq_answer:
@@ -2159,14 +2255,6 @@ def _handle_message(
                 "• الكمية: 3"
             )
 
-        if information_answers:
-
-            return (
-                "\n".join(information_answers)
-                + "\n\nطلبك ما زال جاهزاً للتأكيد؛ "
-                "اكتب: تأكيد لإكماله، أو تعديل لتغييره."
-            )
-
         if (
             phone
             or city
@@ -2191,10 +2279,6 @@ def _handle_message(
             "طلبك جاهز للتأكيد 👍\n\n"
             + order_review_text(state)
         )
-
-    if information_answers:
-
-        return "\n".join(information_answers)
 
     # -----------------------------------------
     # GREETING
@@ -2256,78 +2340,6 @@ def _handle_message(
             + "\n\n"
             + "إذا بدك واحد منهم، "
             + "قلي مثلاً: بدي أطلب الجهاز."
-        )
-
-    # -----------------------------------------
-    # PRICE
-    # -----------------------------------------
-
-    if (
-        is_price_question(text)
-        and not is_buy_intent(text)
-    ):
-
-        if product:
-
-            data = product[1]
-
-            price = data["price"]
-
-            if float(price).is_integer():
-                price = int(price)
-
-            return (
-                f"سعر {product[0]} "
-                f"هو {price}"
-                f"{data['currency']} ✅"
-            )
-
-        if len(PRODUCTS) == 1:
-
-            only_name, data = next(
-                iter(
-                    PRODUCTS.items()
-                )
-            )
-
-            price = data["price"]
-
-            if float(price).is_integer():
-                price = int(price)
-
-            return (
-                f"سعر {only_name} "
-                f"هو {price}"
-                f"{data['currency']} ✅"
-            )
-
-        return (
-            "أكيد 👍 لأي منتج بدك السعر؟\n"
-            + "\n".join(
-                f"• {name}"
-                for name in PRODUCTS
-            )
-        )
-
-    # -----------------------------------------
-    # DELIVERY
-    # -----------------------------------------
-
-    if (
-        is_delivery_question(text)
-        and not is_buy_intent(text)
-    ):
-
-        if city:
-
-            return (
-                f"التوصيل إلى {city}: "
-                f"{DELIVERY.get(city, '2-4 أيام')} 🚚"
-            )
-
-        return (
-            "أكيد 🚚 لأي مدينة بدك "
-            "تعرف مدة التوصيل؟"
         )
 
     # -----------------------------------------
