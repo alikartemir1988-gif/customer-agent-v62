@@ -6,7 +6,7 @@ from functools import wraps
 
 from flask import Flask, redirect, render_template, request, session, url_for
 
-from app import ORDER_STATUSES, database_is_available, list_orders, order_metrics, set_order_status
+from app import ORDER_STATUSES, database_is_available, list_orders, order_metrics, set_order_status, support_store
 
 
 ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "").strip()
@@ -147,6 +147,57 @@ def change_order_status(order_id):
 def health():
     ok = database_is_available()
     return {"ok": ok, "service": "customer-agent-dashboard"}, (200 if ok else 503)
+
+
+@dashboard_app.get("/support")
+@dashboard_required
+def support_dashboard():
+    status = request.args.get("status", "open")
+    if status not in {"open", "closed"}:
+        status = "open"
+    return render_template("support.html", faqs=support_store.faqs(),
+                           tickets=support_store.tickets(status), status=status,
+                           metrics=support_store.metrics(), csrf_token=csrf_token(),
+                           error=request.args.get("error", "")[:300])
+
+
+@dashboard_app.post("/support/faqs")
+@dashboard_app.post("/support/faqs/<int:faq_id>")
+@dashboard_required
+def save_support_faq(faq_id=None):
+    if not csrf_valid():
+        return "Invalid CSRF token", 400
+    payload = {key: request.form.get(key, "") for key in
+               ("question", "answer", "source_title", "source_url")}
+    payload["aliases"] = [line.strip() for line in request.form.get("aliases", "").splitlines() if line.strip()]
+    payload["approved"] = request.form.get("approved") == "on"
+    try:
+        saved = support_store.save_faq(payload, faq_id)
+    except ValueError as exc:
+        return redirect(url_for("support_dashboard", error=str(exc)))
+    if saved is None:
+        return "FAQ not found", 404
+    return redirect(url_for("support_dashboard"))
+
+
+@dashboard_app.post("/support/faqs/<int:faq_id>/delete")
+@dashboard_required
+def delete_support_faq(faq_id):
+    if not csrf_valid():
+        return "Invalid CSRF token", 400
+    if not support_store.delete_faq(faq_id):
+        return "FAQ not found", 404
+    return redirect(url_for("support_dashboard"))
+
+
+@dashboard_app.post("/support/tickets/<int:ticket_id>/close")
+@dashboard_required
+def close_support_ticket(ticket_id):
+    if not csrf_valid():
+        return "Invalid CSRF token", 400
+    if not support_store.close_ticket(ticket_id):
+        return "Ticket not found", 404
+    return redirect(url_for("support_dashboard"))
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ body{font-family:system-ui;margin:0;background:#f5f7fb;color:#172033}.wrap{max-w
 </head>
 <body><main class="wrap">
 <div class="top"><div><h1>لوحة إدارة العملاء والمبيعات</h1><div class="muted">نظرة تشغيلية مباشرة على الطلبات</div></div><form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="logout">تسجيل الخروج</button></form></div>
+<p><a href="{{ url_for('support_dashboard') }}">إدارة الإجابات المعتمدة وطلبات الموظف</a></p>
 <section class="cards">
 <div class="card"><div class="muted">كل الطلبات</div><div class="value">{{ total_orders }}</div></div>
 <div class="card"><div class="muted">طلبات نشطة</div><div class="value">{{ active_orders }}</div></div>

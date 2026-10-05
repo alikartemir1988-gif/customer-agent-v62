@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>إدارة المعرفة والمتابعة — V6</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f5f7fb;color:#172033;font-family:system-ui;line-height:1.65}.wrap{max-width:1150px;margin:auto;padding:24px}header{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}h1{margin:0}h2{margin-top:0}.muted{color:#667085}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}.card,.panel,details{background:white;padding:18px;border-radius:14px;box-shadow:0 4px 20px #00000008}.panel{margin-top:22px}.value{font-size:30px;font-weight:800}input:not([type=checkbox]),textarea{display:block;width:100%;border:1px solid #ccd3df;border-radius:8px;padding:10px;font:inherit}textarea{min-height:85px}label{display:block;margin:12px 0 4px}button{padding:9px 14px;background:#172033;color:white;border:0;border-radius:8px;font:inherit;cursor:pointer}a{color:#245f9f}.danger{background:#a12222}.error{padding:14px;border-radius:10px;background:#fde6e5;color:#a12222}details{margin-top:12px}summary{cursor:pointer;font-weight:700}.ticket{border:1px solid #dde3ed;border-radius:12px;padding:15px;margin:15px 0}.message{white-space:pre-wrap;overflow-wrap:anywhere;background:#f5f7fb;border-radius:8px;padding:10px}.meta{overflow-wrap:anywhere}.actions{display:flex;align-items:center;gap:12px;margin-top:14px;flex-wrap:wrap}.checkbox{display:flex;gap:8px;align-items:center}small{color:#667085}
+</style>
+</head>
+<body><main class="wrap">
+<header><div><h1>المعرفة وطلبات الموظف</h1><p class="muted">راجع الإجابات قبل تفعيلها وتابع الحالات التي طلبت موظفًا.</p></div><a href="{{ url_for('dashboard') }}">العودة للطلبات</a></header>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+<section class="grid">
+<div class="card"><span class="muted">إجابات FAQ معتمدة أُرسلت</span><div class="value">{{ metrics.faq_answers }}</div></div>
+<div class="card"><span class="muted">رسائل بلا إجابة مؤكدة</span><div class="value">{{ metrics.unknown_questions }}</div></div>
+<div class="card"><span class="muted">طلبات موظف مفتوحة</span><div class="value">{{ metrics.open_tickets }}</div></div>
+<div class="card"><span class="muted">أسئلة مفعلة</span><div class="value">{{ metrics.approved_faqs }}</div></div>
+</section><p class="muted">الأرقام تعدّ الرسائل والطلبات المسجلة؛ لا تقيس حل مشكلة العميل أو رضاه. الديمو مستبعد.</p>
+<section class="panel"><h2>طلبات متابعة الموظف</h2><p class="muted">قائمة متابعة يراجعها المشغّل، وليست اتصالًا مباشرًا بموظف. الرد يتم عبر قناة العميل المسجلة.</p>
+<p><a href="{{ url_for('support_dashboard',status='open') }}">المفتوحة</a> · <a href="{{ url_for('support_dashboard',status='closed') }}">المغلقة</a></p>
+{% for ticket in tickets %}<article class="ticket"><strong>طلب #{{ ticket.id }}</strong><div class="meta muted">القناة: {{ ticket.channel }} · معرّف المحادثة: {{ ticket.conversation_id }} · {{ ticket.created_at }}</div>
+<p>المنتج: {{ ticket.context.product or '—' }} · الكمية: {{ ticket.context.qty or '—' }} · المدينة: {{ ticket.context.city or '—' }} · رقم الطلب: {{ ticket.context.order_id or '—' }}</p>
+{% if ticket.context.name or ticket.context.phone %}<p>العميل: {{ ticket.context.name or '—' }} · الهاتف: {{ ticket.context.phone or '—' }}</p>{% endif %}
+{% for message in ticket.messages %}<p class="message">{{ message.text }}</p>{% endfor %}
+{% if ticket.status == 'open' %}<form method="post" action="{{ url_for('close_support_ticket', ticket_id=ticket.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>إغلاق بعد المتابعة</button></form>{% endif %}
+</article>{% else %}<p class="muted">لا توجد طلبات {{ 'مفتوحة' if status == 'open' else 'مغلقة' }}.</p>{% endfor %}
+</section>
+<section class="panel"><h2>الإجابات المعتمدة</h2><p class="muted">يستخدم المساعد الإجابة المفعلة عند تطابق السؤال أو إحدى صيغه. أضف صياغة بديلة في كل سطر. عنوان المصدر إلزامي؛ رابطه اختياري.</p>
+{% for faq in faqs %}<details><summary>{{ faq.question }} — {{ 'مفعلة' if faq.approved else 'مسودة' }}</summary>
+<form method="post" action="{{ url_for('save_support_faq', faq_id=faq.id) }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<label>السؤال<input name="question" value="{{ faq.question }}" maxlength="300" required></label>
+<label>الصيغ البديلة<textarea name="aliases">{{ faq.aliases|join('\n') }}</textarea></label>
+<label>الإجابة<textarea name="answer" maxlength="2000" required>{{ faq.answer }}</textarea></label>
+<label>عنوان المصدر<input name="source_title" value="{{ faq.source_title }}" maxlength="120" required></label>
+<label>رابط المصدر HTTPS<input type="url" name="source_url" value="{{ faq.source_url }}" maxlength="1000" dir="ltr"></label>
+<label class="checkbox"><input type="checkbox" name="approved" {{ 'checked' if faq.approved else '' }}>راجعت الإجابة وأوافق على استخدامها</label>
+<div class="actions"><button>حفظ التعديل</button></div></form>
+<form class="actions" method="post" action="{{ url_for('delete_support_faq', faq_id=faq.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="danger">حذف السؤال</button></form></details>{% endfor %}
+<details><summary>إضافة سؤال جديد</summary><form method="post" action="{{ url_for('save_support_faq') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<label>السؤال<input name="question" maxlength="300" required></label>
+<label>الصيغ البديلة<textarea name="aliases"></textarea></label>
+<label>الإجابة<textarea name="answer" maxlength="2000" required></textarea></label>
+<label>عنوان المصدر<input name="source_title" maxlength="120" required></label>
+<label>رابط المصدر HTTPS<input type="url" name="source_url" maxlength="1000" dir="ltr"></label>
+<label class="checkbox"><input type="checkbox" name="approved">راجعت الإجابة وأوافق على استخدامها</label>
+<button>حفظ السؤال</button></form></details>
+</section>
+</main></body></html>

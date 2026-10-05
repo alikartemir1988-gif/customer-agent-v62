@@ -1,4 +1,4 @@
-# Customer Agent V6.3.2
+# Customer Agent V6.4.0
 
 A Telegram and Facebook Messenger sales assistant that answers product, pricing,
 and delivery questions and records confirmed customer orders.
@@ -24,6 +24,44 @@ and delivery questions and records confirmed customer orders.
 - Exposes a protected administration API and a CSRF-protected browser dashboard.
 - Tracks order status changes in an audit trail and reports revenue by currency.
 - Supports validated merchant catalog and delivery configuration without source edits.
+
+## Reviewed answers and staff follow-up
+
+Open `/dashboard/login` on the existing core service, sign in with `ADMIN_API_KEY`,
+then choose **إدارة الإجابات المعتمدة وطلبات الموظف**. A separate dashboard service
+is optional; the operator interface now also runs inside the core service.
+
+- Create a question, answer, source title, optional HTTPS source URL, and up to
+  20 alternative question phrasings. Entries start as drafts unless approved.
+- Reviewed answers match complete normalized questions/aliases, not semantic
+  search. Add Arabic or English Q&A explicitly; the order workflow remains Arabic.
+- The reply cites that entry's source. The source title is supplied and reviewed
+  by the merchant; V6 does not fetch or independently validate the cited document.
+- A customer can write `موظف` or `talk to a human` to create a private follow-up
+  ticket with current order context. Further messages append to that ticket.
+  `ارجع للبوت` or `back to bot` closes it and resumes the existing order flow.
+- Operators review and close tickets in the dashboard. This is a follow-up queue;
+  it does not connect an online staff member or send their replies automatically.
+- Local counters report reviewed FAQ replies, messages that reached the no-answer
+  fallback, and staff requests. They do not establish resolution rate, satisfaction,
+  labor savings, or billing outcomes. Optional Gemini replies remain separate.
+- The public demo uses fictional FAQ policies and simulated staff requests.
+  It never loads merchant FAQ content or writes production support tickets/counters.
+
+Tables are created automatically in the existing PostgreSQL/SQLite database.
+No new provider or paid dependency is required. Keep the database backed up;
+operator tickets contain customer-provided details.
+
+Protected API endpoints, with `X-Admin-Key`:
+
+- `GET /admin/support/faqs`, `POST /admin/support/faqs`
+- `PUT /admin/support/faqs/<id>`, `DELETE /admin/support/faqs/<id>`
+- `GET /admin/support/tickets?status=open` (or `closed`)
+- `POST /admin/support/tickets/<id>/close`
+- `GET /admin/support/stats`
+
+See [the market comparison](docs/MARKET_COMPARISON_2026-10-05.md) and
+[commercial scope](SALES.md) before using these features in an offer.
 
 ## Required environment variables
 
@@ -148,4 +186,3 @@ gunicorn --workers 1 --bind 0.0.0.0:$PORT demo_app:demo_app
   does not register the production Telegram webhook.
 
 Use `main` for both Render services to keep future releases aligned.
-
