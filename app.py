@@ -54,7 +54,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
 DB_PATH = os.environ.get("DB_PATH", "customer_agent.db").strip()
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
-APP_VERSION = "6.4.2"
+APP_VERSION = "6.5.0"
 GIT_COMMIT = os.environ.get("RENDER_GIT_COMMIT", "").strip()
 
 API = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
@@ -77,6 +77,7 @@ CONFIGURATION_ERRORS = []
 
 DEFAULT_PRODUCTS = {
     "الجهاز": {
+        "name_en": "Device",
         "price": 30.0,
         "currency": "$",
         "available": True,
@@ -89,10 +90,13 @@ DEFAULT_PRODUCTS = {
             "اجهزة",
             "الأجهزة",
             "الاجهزة",
+            "device",
+            "devices",
         ],
     },
 
     "منتج تجريبي": {
+        "name_en": "Demo product",
         "price": 30.0,
         "currency": "$",
         "available": True,
@@ -101,6 +105,8 @@ DEFAULT_PRODUCTS = {
         "aliases": [
             "منتج تجريبي",
             "التجريبي",
+            "demo product",
+            "demo products",
         ],
     },
 }
@@ -159,6 +165,18 @@ def _valid_products(value):
             return False
 
         if "aliases" in data and not _valid_text_list(data["aliases"]):
+            return False
+
+        if "name_en" in data and (
+            not isinstance(data["name_en"], str) or not data["name_en"].strip()
+        ):
+            return False
+        labels = data.get("labels_en", {})
+        if not isinstance(labels, dict) or any(
+            not isinstance(key, str) or not key.strip()
+            or not isinstance(label, str) or not label.strip()
+            for key, label in labels.items()
+        ):
             return False
 
         for key in ("colors", "payment_methods"):
@@ -376,10 +394,68 @@ def contains_any(text, phrases):
 
     n = norm(text)
 
-    return any(
-        norm(phrase) in n
-        for phrase in phrases
+    return any(phrase_matches(n, norm(phrase)) for phrase in phrases)
+
+
+def phrase_matches(normalized_text, phrase):
+    # English aliases/intents must match whole words: "hi" is not "shipping".
+    if re.search(r"[a-z]", phrase):
+        return bool(re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", normalized_text))
+    return bool(phrase) and phrase in normalized_text
+
+
+ENGLISH_LABELS = {
+    "أسود": "Black", "أبيض": "White", "أحمر": "Red", "أزرق": "Blue",
+    "أخضر": "Green", "الدفع عند الاستلام": "Cash on delivery",
+    "دمشق": "Damascus", "حلب": "Aleppo", "حمص": "Homs", "حماة": "Hama",
+    "اللاذقية": "Latakia", "الحسكة": "Hasakah", "القامشلي": "Qamishli",
+    "طرطوس": "Tartus", "الرقة": "Raqqa", "دير الزور": "Deir ez-Zor",
+    "درعا": "Daraa", "إدلب": "Idlib", "السويداء": "Suwayda",
+}
+ENGLISH_NUMBERS = {
+    word: number for number, word in enumerate(
+        ("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"), 1
     )
+}
+ENGLISH_NUMBERS["zero"] = 0
+QUANTITY_WORDS = {
+    **ENGLISH_NUMBERS, "واحد": 1, "واحده": 1, "اثنين": 2, "اتنين": 2,
+    "ثلاث": 3, "ثلاثه": 3, "اربع": 4, "اربعه": 4, "خمس": 5, "خمسه": 5,
+}
+
+
+def say(state, arabic, english):
+    return english if state.get("language") == "en" else arabic
+
+
+def label_text(value, state, product_name=None):
+    if state.get("language") != "en":
+        return value
+    return PRODUCTS.get(product_name, {}).get("labels_en", {}).get(
+        value, ENGLISH_LABELS.get(value, value)
+    )
+
+
+def product_label(name, state):
+    return PRODUCTS[name].get("name_en", name) if state.get("language") == "en" else name
+
+
+def duration_text(value, state):
+    return re.sub(r"أيام|ايام|يوم", "days", value) if state.get("language") == "en" else value
+
+
+def choose_language(state, text):
+    n = norm(text)
+    if n in {"english", "in english", "speak english", "الانجليزيه"}:
+        state["language"] = "en"
+        return True
+    if n in {"arabic", "in arabic", "العربيه", "بالعربي"}:
+        state["language"] = "ar"
+        return True
+    # Numeric replies and customer names do not change an active order's language.
+    if not state["buying"] and not state["done"] and re.search(r"[A-Za-z]", text) and not re.search(r"[\u0600-\u06ff]", text):
+        state["language"] = "en"
+    return False
 
 
 # =========================================================
@@ -802,6 +878,10 @@ def default_session_state():
         "customer_message": None,
         "source": "direct",
         "support_ticket_id": None,
+        "language": "ar",
+        "order_step": None,
+        "quantity_set": False,
+        "color_skipped": False,
     }
 
 
@@ -952,14 +1032,15 @@ def detect_city(text):
     n = norm(text)
 
     cities = sorted(
-        CITIES,
+        set(CITIES) | set(DELIVERY),
         key=lambda x: len(norm(x)),
         reverse=True,
     )
 
     for city in cities:
 
-        if norm(city) in n:
+        aliases = [city, ENGLISH_LABELS.get(city, city)]
+        if any(phrase_matches(n, norm(alias)) for alias in aliases):
             return city
 
     return None
@@ -982,12 +1063,14 @@ def detect_products(text):
         )
 
         aliases.add(name)
+        if data.get("name_en"):
+            aliases.add(data["name_en"])
 
         for alias in aliases:
 
             alias_n = norm(alias)
 
-            if alias_n and alias_n in n:
+            if phrase_matches(n, alias_n):
 
                 found.append(
                     (name, data)
@@ -1031,6 +1114,7 @@ def detect_quantity(text):
             return qty
 
     mapping = {
+        **ENGLISH_NUMBERS,
         "واحد": 1,
         "واحده": 1,
 
@@ -1052,7 +1136,7 @@ def detect_quantity(text):
 
     for word, qty in mapping.items():
 
-        if norm(word) in n:
+        if phrase_matches(n, norm(word)):
             return qty
 
     return 1
@@ -1063,6 +1147,14 @@ def detect_quantity(text):
 # =========================================================
 
 def explicit_name(text):
+
+    english = re.search(
+        r"(?:\bmy name is\b|\bname\s*:)\s*([A-Za-z][A-Za-z '\-]{0,79}?)"
+        r"(?=\s+and\s+(?:my\s+)?(?:phone|city|quantity|qty)\b|[,;\n]|$)",
+        str(text), re.IGNORECASE,
+    )
+    if english:
+        return english.group(1).strip()
 
     match = re.search(
         r"(?:اسمي|الاسم)\s*[:\-]?\s*"
@@ -1084,6 +1176,27 @@ def explicit_name(text):
 def is_buy_intent(text):
 
     n = norm(text)
+
+    if re.search(r"\b(?:do not|don t|not|never)\s+(?:want|buy|order|purchase)\b", n):
+        return False
+    if re.search(r"\b(?:i (?:want|would like|d like) to (?:buy|order|purchase)|place (?:an |the )?order)\b", n) or n in {"order", "buy", "purchase"}:
+        # Questions about placing an order must not start a purchase.
+        if not re.match(r"^(?:how|what|can|could|do|does|is|are)\b", n):
+            return True
+    for name, data in PRODUCTS.items():
+        for alias in [name, data.get("name_en", ""), *data.get("aliases", [])]:
+            if not re.search(r"[a-z]", norm(alias)):
+                continue
+            shades = [norm(ENGLISH_LABELS.get(c, c)) for c in product_colors(name)]
+            shades += [norm(c) for c in data.get("labels_en", {}).values()]
+            count = r"(?:\d+|" + "|".join(ENGLISH_NUMBERS) + ")"
+            color = "|".join(re.escape(c) for c in shades) or r"(?!)"
+            if re.search(
+                rf"\b(?:i (?:want|would like|d like)|i ll take|buy|purchase|order)\s+"
+                rf"(?:(?:a|an|the)\s+)?(?:{count}\s+)?(?:(?:{color})\s+)?"
+                rf"{re.escape(norm(alias))}(?!\w)", n,
+            ):
+                return True
 
     purchase_prefix = (
         r"(?:بدي|بدنا|اريد|حابب|حابه|حاب)"
@@ -1146,6 +1259,7 @@ def is_products_question(text):
         text,
         [
             "شو في عندكم",
+            "products", "catalog", "what do you sell", "what is available",
             "شو عندكم",
             "شو المنتجات",
             "ما هي المنتجات",
@@ -1168,6 +1282,7 @@ def is_product_count_question(text):
         text,
         [
             "كم منتج",
+            "how many products", "product count",
             "عدد المنتجات",
             "قديش منتج",
             "كم نوع",
@@ -1182,6 +1297,7 @@ def is_price_question(text):
         text,
         [
             "سعر",
+            "price", "cost", "how much", "total",
             "بكم",
             "قديش",
             "كم حق",
@@ -1198,6 +1314,7 @@ def is_delivery_question(text):
         text,
         [
             "توصيل",
+            "delivery", "shipping", "ship", "deliver",
             "شحن",
             "يوصل",
             "التوصيل",
@@ -1208,10 +1325,16 @@ def is_delivery_question(text):
 
 def is_color_question(text):
 
+    if contains_any(text, ["available", "in stock"]) and detect_color(text):
+        return True
+
     return contains_any(
         text,
         [
             "كم لون",
+            "what colors", "what colours", "which colors", "which colours",
+            "available colors", "available colours", "colors available", "colours available",
+            "color options", "colour options", "what color", "what colour",
             "ما هو لون",
             "ماهو لون",
             "ما هي الالوان",
@@ -1257,6 +1380,9 @@ def detect_color(text, product_name=None):
     normalized_text = norm(text)
 
     for color in sorted(colors, key=lambda item: len(norm(item)), reverse=True):
+        english_label = PRODUCTS.get(product_name, {}).get("labels_en", {}).get(color, ENGLISH_LABELS.get(color, color))
+        if phrase_matches(normalized_text, norm(english_label)):
+            return color
         normalized_color = norm(color)
         if not normalized_color:
             continue
@@ -1276,6 +1402,8 @@ def detect_color_choice(text, product_name=None):
     color = detect_color(text, product_name)
     if not color or is_color_question(text):
         return None
+    if is_buy_intent(text):
+        return color
 
     normalized_text = norm(text)
     question_words = {
@@ -1287,6 +1415,7 @@ def detect_color_choice(text, product_name=None):
         "كم",
         "متوفر",
         "متوفره",
+        "what", "which", "how", "is", "are", "available",
     }
 
     if any(word in normalized_text.split() for word in question_words):
@@ -1301,6 +1430,7 @@ def is_payment_question(text):
         text,
         [
             "طرق الدفع",
+            "payment", "pay", "cash on delivery",
             "طريقة الدفع",
             "ما هي طرق الدفع",
             "ماهي طرق الدفع",
@@ -1336,9 +1466,38 @@ def product_for_answer(state, detected_product=None):
     return None
 
 
+def quantity_details(text, allow_bare=False):
+    """Extract item quantities without using phone numbers or policy durations."""
+    n = norm(text)
+    tokens = r"\d+|" + "|".join(QUANTITY_WORDS)
+    match = re.search(rf"\b(?:quantity|qty|الكميه|العدد)\s+(?:(?:to|is)\s+)?({tokens})\b", n)
+    if not match and allow_bare:
+        match = re.fullmatch(rf"({tokens})", n)
+    if not match:
+        aliases = {"units", "items", "pieces", "devices", "products", "قطعه", "قطع", "جهاز", "اجهزه", "منتج", "منتجات"}
+        colors = set()
+        for name, data in PRODUCTS.items():
+            aliases.update(norm(a) for a in [name, data.get("name_en", ""), *data.get("aliases", [])] if a)
+            colors.update(norm(ENGLISH_LABELS.get(c, c)) for c in product_colors(name))
+            colors.update(norm(c) for c in data.get("labels_en", {}).values())
+        units = "|".join(re.escape(a) for a in sorted(aliases, key=len, reverse=True))
+        shades = "|".join(re.escape(c) for c in sorted(colors, key=len, reverse=True))
+        match = re.search(rf"\b({tokens})\s+(?:(?:{shades})\s+)?(?:{units})(?:\s|$)", n)
+    if not match:
+        return None
+    token = match.group(1)
+    value = int(token) if token.isdecimal() else QUANTITY_WORDS[token]
+    if re.search(rf"(?<!\w)-\s*{re.escape(token)}\b", str(text)):
+        return -value
+    return value
+
+
 def quote_quantity(text):
     """Read a quoted item count, not warranty years or a claimed price."""
     n = norm(text)
+    english_qty = quantity_details(text)
+    if english_qty is not None:
+        return english_qty if 1 <= english_qty <= 1_000_000 else None
     if re.search(r"\b(?:قطعتين|جهازين|منتجين)\b", n):
         return 2
     match = re.search(
@@ -1358,6 +1517,7 @@ def reviewed_policy_answer(text, source, terms):
     entries = DEMO_FAQS if source == "demo" else support_store.faqs(approved_only=True)
     for clause in re.split(r"[؟?،,؛;\n]", text):
         clause = re.sub(r"^\s*و(?=هل\b|شو\b|كم\b|في\b)", "", clause).strip()
+        clause = re.sub(r"^and\s+", "", clause, flags=re.IGNORECASE)
         if contains_any(clause, terms):
             answer = find_reviewed_answer(clause, entries)
             if answer:
@@ -1371,42 +1531,41 @@ def product_information_answers(text, state, detected_product=None, source=None)
     selected = product_for_answer(state, detected_product)
     answers = []
 
-    if is_price_question(text) and not is_buy_intent(text):
+    if is_price_question(text):
         if selected:
             product_name, data = selected
-            answers.append(f"سعر {product_name} هو {money_text(data['price'])}{data['currency']} ✅")
+            amount = f"{money_text(data['price'])}{data['currency']}"
+            answers.append(say(state, f"سعر {product_name} هو {amount} ✅", f"The price of {product_label(product_name, state)} is {amount} ✅"))
             qty = quote_quantity(text)
             if qty is None:
-                answers.append("حدد كمية بين 1 و1000000 لحساب الإجمالي.")
+                answers.append(say(state, "حدد كمية بين 1 و1000000 لحساب الإجمالي.", "Choose a quantity between 1 and 1000000 to calculate the total."))
             elif qty > 1:
                 total = data["price"] * qty
                 if math.isfinite(total):
-                    answers.append(
-                        f"إجمالي {qty} قطع: {money_text(total)}{data['currency']} "
-                        "قبل رسوم التوصيل ودون احتساب أي خصم."
-                    )
+                    amount = f"{money_text(total)}{data['currency']}"
+                    answers.append(say(state, f"إجمالي {qty} قطع: {amount} قبل رسوم التوصيل ودون احتساب أي خصم.", f"Total for {qty} items: {amount}, before delivery fees and without any discount."))
                 else:
-                    answers.append("تعذر حساب الإجمالي؛ يحتاج مراجعة المتجر.")
+                    answers.append(say(state, "تعذر حساب الإجمالي؛ يحتاج مراجعة المتجر.", "The store needs to review this total."))
         else:
-            answers.append("لأي منتج تريد السعر؟ " + "، ".join(PRODUCTS))
+            answers.append(say(state, "لأي منتج تريد السعر؟ ", "Which product would you like a price for? ") + ", ".join(product_label(p, state) for p in PRODUCTS))
 
     delivery_cost = is_delivery_question(text) and contains_any(
-        text, ["مجاني", "مجانا", "رسوم", "تكلفة", "كلفة", "أجرة"]
+        text, ["مجاني", "مجانا", "رسوم", "تكلفة", "كلفة", "أجرة", "free", "fees", "cost", "charge", "charges"]
     )
-    if is_delivery_question(text) and not is_buy_intent(text):
+    if is_delivery_question(text):
         city = detect_city(text)
-        if not delivery_cost or contains_any(text, ["مدة", "خلال", "متى", "أيام", "ساعة"]):
+        if city or not delivery_cost or contains_any(text, ["مدة", "خلال", "متى", "أيام", "ساعة", "when", "how long", "days", "time"]):
             if city in DELIVERY:
-                answers.append(f"التوصيل إلى {city}: {DELIVERY[city]} 🚚")
+                answers.append(say(state, f"التوصيل إلى {city}: {DELIVERY[city]} 🚚", f"Delivery to {label_text(city, state)}: {duration_text(DELIVERY[city], state)} 🚚"))
             elif city:
-                answers.append(f"مدة التوصيل إلى {city} غير محددة؛ تحتاج تأكيد المتجر.")
+                answers.append(say(state, f"مدة التوصيل إلى {city} غير محددة؛ تحتاج تأكيد المتجر.", f"Delivery time to {label_text(city, state)} needs confirmation from the store."))
             else:
-                answers.append("لأي مدينة تريد معرفة مدة التوصيل؟")
+                answers.append(say(state, "لأي مدينة تريد معرفة مدة التوصيل؟", "Which city would you like delivery information for?"))
         if delivery_cost:
-            terms = ["توصيل", "شحن"]
+            terms = ["توصيل", "شحن", "delivery", "shipping"]
             answers.append(
                 reviewed_policy_answer(text, source, terms)
-                or "رسوم التوصيل: ما عندي معلومة معتمدة تؤكد أنها مجانية؛ تحتاج تأكيد المتجر."
+                or say(state, "رسوم التوصيل: ما عندي معلومة معتمدة تؤكد أنها مجانية؛ تحتاج تأكيد المتجر.", "Delivery fees: there is no approved information confirming free delivery; the store must confirm this.")
             )
 
     if is_color_question(text):
@@ -1415,16 +1574,16 @@ def product_information_answers(text, state, detected_product=None, source=None)
             colors = product_colors(product_name)
             if colors:
                 answers.append(
-                    f"ألوان {product_name} المتوفرة: "
-                    + "، ".join(colors)
+                    say(state, f"ألوان {product_name} المتوفرة: ", f"Available colors for {product_label(product_name, state)}: ")
+                    + "، ".join(label_text(c, state, product_name) for c in colors)
                     + " ✅"
                 )
             else:
-                answers.append(f"ألوان {product_name} غير محددة حالياً.")
+                answers.append(say(state, f"ألوان {product_name} غير محددة حالياً.", f"Colors for {product_label(product_name, state)} are not specified."))
         else:
             answers.append(
-                "لأي منتج تريد معرفة الألوان؟ "
-                + "، ".join(PRODUCTS)
+                say(state, "لأي منتج تريد معرفة الألوان؟ ", "Which product would you like colors for? ")
+                + ", ".join(product_label(p, state) for p in PRODUCTS)
             )
 
     if is_payment_question(text):
@@ -1433,12 +1592,12 @@ def product_information_answers(text, state, detected_product=None, source=None)
             methods = data.get("payment_methods", [])
             if methods:
                 answers.append(
-                    f"طرق الدفع لـ{product_name}: "
-                    + "، ".join(methods)
+                    say(state, f"طرق الدفع لـ{product_name}: ", f"Payment methods for {product_label(product_name, state)}: ")
+                    + ", ".join(label_text(m, state, product_name) for m in methods)
                     + "."
                 )
             else:
-                answers.append("طرق الدفع المتاحة غير محددة حالياً.")
+                answers.append(say(state, "طرق الدفع المتاحة غير محددة حالياً.", "Available payment methods are not specified."))
         else:
             methods = []
             for data in PRODUCTS.values():
@@ -1446,8 +1605,8 @@ def product_information_answers(text, state, detected_product=None, source=None)
                     if method not in methods:
                         methods.append(method)
             answers.append(
-                "طرق الدفع المتاحة: "
-                + ("، ".join(methods) if methods else "غير محددة حالياً")
+                say(state, "طرق الدفع المتاحة: ", "Available payment methods: ")
+                + (", ".join(label_text(m, state) for m in methods) if methods else say(state, "غير محددة حالياً", "not specified"))
                 + "."
             )
 
@@ -1455,16 +1614,16 @@ def product_information_answers(text, state, detected_product=None, source=None)
     # Standalone open questions still use reviewed FAQs and the existing AI fallback.
     if answers:
         policies = [
-            ("الضمان", ["ضمان", "كفالة"]),
-            ("الإرجاع والاستبدال", ["إرجاع", "استرجاع", "استبدال"]),
+            (say(state, "الضمان", "Warranty"), ["ضمان", "كفالة", "warranty", "guarantee"]),
+            (say(state, "الإرجاع والاستبدال", "Returns and exchanges"), ["إرجاع", "استرجاع", "استبدال", "return", "returns", "return policy", "refund", "exchange"]),
         ]
-        if not contains_any(text, ["بدون خصم", "بلا خصم", "من غير خصم"]):
-            policies.append(("الخصم", ["خصم", "تخفيض"]))
+        if not contains_any(text, ["بدون خصم", "بلا خصم", "من غير خصم", "without discount", "without a discount", "no discount"]):
+            policies.append((say(state, "الخصم", "Discount"), ["خصم", "تخفيض", "discount", "discounts"]))
         for title, terms in policies:
             if contains_any(text, terms):
                 answers.append(
                     reviewed_policy_answer(text, source, terms)
-                    or f"{title}: ما عندي معلومة معتمدة عنه؛ يحتاج تأكيد المتجر."
+                    or say(state, f"{title}: ما عندي معلومة معتمدة عنه؛ يحتاج تأكيد المتجر.", f"{title}: there is no approved information; the store must confirm this.")
                 )
 
     return answers
@@ -1474,16 +1633,18 @@ def product_information_answers(text, state, detected_product=None, source=None)
 # PRODUCT LIST
 # =========================================================
 
-def product_list_text():
+def product_list_text(state=None):
+
+    state = state or {}
 
     lines = []
 
     for name, data in PRODUCTS.items():
 
         if data.get("available", True):
-            status = "متوفر"
+            status = say(state, "متوفر", "available")
         else:
-            status = "غير متوفر"
+            status = say(state, "غير متوفر", "unavailable")
 
         price = data["price"]
 
@@ -1491,13 +1652,13 @@ def product_list_text():
             price = int(price)
 
         lines.append(
-            f"• {name}: "
+            f"• {product_label(name, state)}: "
             f"{price}{data['currency']} "
             f"— {status}"
         )
 
     return (
-        "المنتجات المتوفرة حالياً:\n"
+        say(state, "المنتجات المتوفرة حالياً:\n", "Current products:\n")
         + "\n".join(lines)
     )
 
@@ -1781,6 +1942,7 @@ def parse_order_offset(value, default=0, maximum=1_000_000):
 # =========================================================
 
 CONFIRM_WORDS = {
+    "confirm", "confirm order", "confirm my order", "yes", "yes confirm",
     "تاكيد",
     "تاكيد الطلب",
     "اكد",
@@ -1792,6 +1954,7 @@ CONFIRM_WORDS = {
 }
 
 EDIT_WORDS = {
+    "edit", "edit order", "change order", "modify", "modify order",
     "تعديل",
     "عدل",
     "بدي عدل",
@@ -1818,26 +1981,23 @@ def order_review_text(state):
     )
 
     color_line = (
-        f"اللون: {state['color']}\n"
+        say(state, f"اللون: {state['color']}\n", f"Color: {label_text(state['color'], state, state['product'])}\n")
         if state.get("color")
         else ""
     )
 
     return (
-        "🧾 راجع طلبك قبل التسجيل:\n\n"
-        f"الاسم: {state['name']}\n"
-        f"المنتج: {state['product']}\n"
-        f"{color_line}"
-        f"الكمية: {state['qty']}\n"
-        f"الإجمالي: "
-        f"{money_text(total)}"
-        f"{data['currency']}\n"
-        f"الهاتف: {state['phone']}\n"
-        f"المدينة: {state['city']}\n\n"
-        "إذا المعلومات صحيحة اكتب: تأكيد\n"
-        "للتعديل اكتب المعلومة الجديدة مباشرة، "
-        "مثلاً: الكمية 3 أو المدينة حلب\n"
-        "وللإلغاء اكتب: إلغاء الطلب"
+        say(state, "🧾 راجع طلبك قبل التسجيل:\n\n", "🧾 Review your order before saving:\n\n")
+        + say(state, f"الاسم: {state['name']}\n", f"Name: {state['name']}\n")
+        + say(state, f"المنتج: {state['product']}\n", f"Product: {product_label(state['product'], state)}\n")
+        + color_line
+        + say(state, f"الكمية: {state['qty']}\n", f"Quantity: {state['qty']}\n")
+        + say(state, "الإجمالي: ", "Total: ") + f"{money_text(total)}{data['currency']}\n"
+        + say(state, f"الهاتف: {state['phone']}\n", f"Phone: {state['phone']}\n")
+        + say(state, f"المدينة: {state['city']}\n\n", f"City: {label_text(state['city'], state)}\n\n")
+        + say(state,
+              "إذا المعلومات صحيحة اكتب: تأكيد\nللتعديل اكتب المعلومة الجديدة مباشرة، مثلاً: الكمية 3 أو المدينة حلب\nوللإلغاء اكتب: إلغاء الطلب",
+              "If everything is correct, type: confirm\nTo edit, send the new details, for example: quantity 3 or city Aleppo\nTo cancel, type: cancel order")
     )
 
 
@@ -1846,8 +2006,8 @@ def complete_order(state, confirmation_text):
     if state["done"]:
 
         return (
-            "طلبك مسجل مسبقاً ✅ "
-            f"رقم الطلب: "
+            say(state, "طلبك مسجل مسبقاً ✅ رقم الطلب: ", "Your order is already saved ✅ Order number: ")
+            +
             f"{state['order_id']}"
         )
 
@@ -1875,24 +2035,22 @@ def complete_order(state, confirmation_text):
     )
 
     color_line = (
-        f"اللون: {state['color']}\n"
+        say(state, f"اللون: {state['color']}\n", f"Color: {label_text(state['color'], state, state['product'])}\n")
         if state.get("color")
         else ""
     )
 
     return (
-        "✅ تم تسجيل طلبك بنجاح\n\n"
-        f"رقم الطلب: {order_id}\n"
-        f"الاسم: {state['name']}\n"
-        f"المنتج: {state['product']}\n"
-        f"{color_line}"
-        f"الكمية: {state['qty']}\n"
-        f"الإجمالي: "
-        f"{money_text(total)}"
-        f"{data['currency']}\n"
-        f"المدينة: {state['city']}\n"
-        f"التوصيل: "
-        f"{DELIVERY.get(state['city'], '2-4 أيام')}"
+        say(state, "✅ تم تسجيل طلبك بنجاح\n\n", "✅ Your order has been saved successfully\n\n")
+        + say(state, f"رقم الطلب: {order_id}\n", f"Order number: {order_id}\n")
+        + say(state, f"الاسم: {state['name']}\n", f"Name: {state['name']}\n")
+        + say(state, f"المنتج: {state['product']}\n", f"Product: {product_label(state['product'], state)}\n")
+        + color_line
+        + say(state, f"الكمية: {state['qty']}\n", f"Quantity: {state['qty']}\n")
+        + say(state, "الإجمالي: ", "Total: ") + f"{money_text(total)}{data['currency']}\n"
+        + say(state, f"المدينة: {state['city']}\n", f"City: {label_text(state['city'], state)}\n")
+        + say(state, "التوصيل: ", "Delivery: ")
+        + duration_text(DELIVERY.get(state['city'], '2-4 أيام'), state)
     )
 
 
@@ -1927,6 +2085,10 @@ def maybe_capture_name(
         words = norm(text).split()
 
         blocked = {
+            "hi", "hello", "buy", "order", "please", "confirm", "yes", "no",
+            "edit", "cancel", "quantity", "qty", "skip", "continue", "thanks",
+            "phone", "city", "name", "how", "what", "when", "where", "can",
+            "i", "want", "help", "delivery", "shipping", "price", "payment",
             "مرحبا",
             "هلا",
             "اهلا",
@@ -1946,7 +2108,7 @@ def maybe_capture_name(
         }
 
         if (
-            1 <= len(words) <= 3
+            1 <= len(words) <= (6 if state.get("language") == "en" else 3)
             and not any(
                 word in blocked
                 for word in words
@@ -1955,7 +2117,7 @@ def maybe_capture_name(
 
             if all(
                 re.fullmatch(
-                    r"[\u0600-\u06FF]+",
+                    r"[\u0600-\u06FF]+|[a-z]+(?:['\-][a-z]+)*",
                     word,
                 )
                 for word in words
@@ -1964,6 +2126,37 @@ def maybe_capture_name(
                 state["name"] = (
                     text.strip()
                 )
+
+
+def order_prompt(state):
+    """The same required fields and review gate apply in both languages."""
+    if not state["product"] or state["product"] not in PRODUCTS:
+        state["order_step"] = "product"
+        return say(state, "تمام 👍 شو المنتج اللي بدك تطلبه؟\n", "Which product would you like to order?\n") + "\n".join(
+            f"• {product_label(name, state)}" for name in PRODUCTS
+        )
+    if not PRODUCTS[state["product"]].get("available", True):
+        state["order_step"] = "product"
+        return say(state, "هذا المنتج غير متوفر حالياً. اختر منتجاً آخر.\n", "This product is unavailable. Please choose another product.\n") + product_list_text(state)
+    if state.get("language") == "en":
+        colors = product_colors(state["product"])
+        if colors and not state["color"] and not state["color_skipped"]:
+            state["order_step"] = "color"
+            return "Choose a color: " + ", ".join(label_text(c, state, state["product"]) for c in colors) + ". Type 'skip' for no color preference."
+        if not state["quantity_set"]:
+            state["order_step"] = "quantity"
+            return "How many would you like? Enter a quantity between 1 and 1000000."
+    if not state["name"]:
+        state["order_step"] = "name"
+        return say(state, "تمام 👍 شو اسمك حتى أسجل الطلب؟", "What is your name for the order?")
+    if not state["phone"]:
+        state["order_step"] = "phone"
+        return say(state, f"تمام {state['name']} 👍 ابعتلي رقم الهاتف.", f"Thanks, {state['name']}. Please send your phone number (at least 8 digits).")
+    if not state["city"]:
+        state["order_step"] = "city"
+        return say(state, "ممتاز 👍 بقي بس أعرف المدينة للتوصيل.", "Which city should we deliver to?")
+    state["order_step"] = "review"
+    return None
 
 
 # =========================================================
@@ -2059,21 +2252,24 @@ def gemini_reply(text):
 def support_handoff_reply(chat_id, text, state, source):
     """Queue staff follow-up; never promise a live connection."""
     n = norm(text)
-    english = bool(re.search(r"[A-Za-z]", text)) and not re.search(r"[\u0600-\u06ff]", text)
-    requested = n in {"موظف", "موظف بشري", "human", "agent", "speak to a human"} or contains_any(
+    english = state.get("language") == "en"
+    requested = n in {"موظف", "موظف بشري", "human", "agent", "staff", "speak to a human"} or contains_any(
         text, ["احكي مع موظف", "احكي مع شخص", "بدي موظف", "اكلم موظف", "التحدث مع موظف",
                "موظف لطلب متابعة", "موظف للمتابعة", "طلب موظف", "طلب متابعة من موظف",
-               "speak to a person", "talk to a human", "talk to an agent", "human agent"]
+               "speak to a person", "speak to a human", "speak to an agent", "talk to a person", "talk to a human", "talk to an agent", "human agent", "talk to staff", "speak to staff"]
     )
     if contains_any(text, ["ما بدي موظف", "لا اريد موظف", "ما بدي طلب موظف", "لا اريد طلب موظف",
                            "don't want a human", "do not want a human"]):
         requested = False
     ticket_id = state.get("support_ticket_id")
-    if ticket_id and n in {"ارجع للبوت", "عوده للبوت", "resume bot", "back to bot"}:
+    if ticket_id and n in {"ارجع للبوت", "عوده للبوت", "resume bot", "back to bot", "return to bot", "continue with bot"}:
         if source != "demo":
             support_store.close_ticket(ticket_id)
         state["support_ticket_id"] = None
-        return "You can continue with the bot." if english else "رجعنا للمساعد الآلي. فيك تكمل طلبك أو تسأل عن المنتجات."
+        reply = "You can continue with the bot." if english else "رجعنا للمساعد الآلي. فيك تكمل طلبك أو تسأل عن المنتجات."
+        if state["buying"]:
+            reply += "\n\n" + (order_prompt(dict(state)) or order_review_text(state))
+        return reply
     if ticket_id and source != "demo":
         ticket = support_store.ticket(ticket_id)
         if not ticket or ticket["status"] != "open":
@@ -2094,381 +2290,191 @@ def support_handoff_reply(chat_id, text, state, source):
             if english else f"طلبك محفوظ للمتابعة من موظف، رقم {ticket_id}. اكتب تفاصيل المشكلة هنا، أو: ارجع للبوت.")
 
 
-def _handle_message(
-    chat_id,
-    text,
-    source=None,
-):
+def order_data_text(text):
+    """Keep supplied order data separate from questions in a compound message."""
+    clauses = re.split(
+        r"[?؟؛;\n]|\band\s+(?=what\b|which\b|how\b|when\b|is\b|are\b)"
+        r"|و(?=هل\b|شو\b|كم\b|قديش\b)", text, flags=re.IGNORECASE,
+    )
+    return "\n".join(clause for clause in clauses if not re.match(
+        r"^\s*(?:what|which|how|when|where|is|are|can|could|do|does|هل|شو|كم|قديش)\b",
+        norm(clause),
+    ))
 
+
+def _handle_message(chat_id, text, source=None):
     state = session(chat_id)
-
-    text = str(
-        text or ""
-    ).strip()
-
+    text = str(text or "").strip()
     if not text:
+        return say(state, "اكتبلي رسالتك حتى أساعدك 👌", "Please write a message so I can help.")
 
-        return (
-            "اكتبلي رسالتك حتى أساعدك 👌"
-        )
-
+    language_command = choose_language(state, text)
     handoff = support_handoff_reply(chat_id, text, state, source)
     if handoff:
         return handoff
+    if language_command:
+        if state["awaiting_confirmation"]:
+            state["quantity_set"] = True
+            state["color_skipped"] = not bool(state["color"])
+            return order_review_text(state)
+        if state["buying"]:
+            state["quantity_set"] = True
+            return order_prompt(state) or order_review_text(state)
+        return say(state, "أهلاً وسهلاً 👋 فيني أساعدك بالمنتجات أو أسجل طلبك.",
+                   "Hello 👋 I can help with products, prices, delivery, or an order.")
 
     n = norm(text)
     product = detect_product(text)
-    cancelling = n in {"الغاء", "الغي"} or contains_any(
+    buying = is_buy_intent(text)
+    cancelling = bool(re.fullmatch(
+        r"(?:please |i want to )?(?:cancel(?:(?: my| the)? order)?|reset|start over)(?: please)?", n
+    )) or n in {"الغاء", "الغي"} or contains_any(
         text, ["الغاء الطلب", "الغي الطلب", "ابدأ من جديد", "بداية جديدة"]
     )
-    if not is_buy_intent(text) and not cancelling and n not in CONFIRM_WORDS | EDIT_WORDS:
-        information_answers = product_information_answers(text, state, product, source)
-        if information_answers:
+    if cancelling:
+        language, channel = state["language"], state["source"]
+        reset(chat_id)
+        # Keep the chosen language when starting a new conversation.
+        session(chat_id).update({"language": language, "source": channel})
+        return say(state, "✅ تمام، لغيت المحادثة الحالية. فيك تبدأ من جديد.",
+                   "✅ The current conversation has been cancelled. You can start again.")
+
+    if state["done"] and n in CONFIRM_WORDS:
+        return complete_order(state, text)
+
+    # Informational questions must not change an active order, including city,
+    # color, phone, quantity or the confirmation gate.
+    if not buying and n not in CONFIRM_WORDS | EDIT_WORDS:
+        information = product_information_answers(text, state, product, source)
+        if is_product_count_question(text):
+            count = sum(p.get("available", True) for p in PRODUCTS.values())
+            information.insert(0, say(state, f"عندنا حالياً {count} منتج/نوع متوفر.\n\n",
+                                      f"We currently have {count} available product types.\n\n") + product_list_text(state))
+        elif is_products_question(text):
+            information.insert(0, product_list_text(state))
+        if information:
             if product and not state["buying"] and not state["done"]:
                 state["product"] = product[0]
-            reply = "\n".join(information_answers)
+            reply = "\n".join(information)
             if state["awaiting_confirmation"]:
-                reply += (
-                    "\n\nطلبك ما زال جاهزاً للتأكيد؛ "
-                    "اكتب: تأكيد لإكماله، أو تعديل لتغييره."
-                )
+                reply += say(state, "\n\nطلبك ما زال جاهزاً للتأكيد؛ اكتب: تأكيد لإكماله، أو تعديل لتغييره.",
+                             "\n\nYour order is still ready for confirmation. Type 'confirm' to save it, or 'edit' to change it.")
+            elif state["buying"] and state["language"] == "en":
+                reply += "\n\n" + (order_prompt(dict(state)) or order_review_text(state))
             return reply
 
-    # -----------------------------------------
-    # Capture useful information
-    # -----------------------------------------
-
-    phone = detect_phone(text)
-
-    city = detect_city(text)
-
-    product = detect_product(text)
-
-    name = explicit_name(text)
-
-    if phone:
-        state["phone"] = phone
-
-    if city:
-        state["city"] = city
-
-    if product:
-        state["product"] = product[0]
-        if state.get("color") not in product_colors(product[0]):
-            state["color"] = None
-
-    color = detect_color_choice(
-        text,
-        state.get("product"),
-    )
-
-    if color:
-        state["color"] = color
-
-    if name:
-        state["name"] = name
-
-    n = norm(text)
-
-    if (
-        state["buying"]
-        and not phone
-        and contains_any(
-            text,
-            [
-                "الكمية",
-                "الكميه",
-                "العدد",
-            ],
-        )
-    ):
-
-        state["qty"] = detect_quantity(
-            text
-        )
-
-    # -----------------------------------------
-    # CANCEL / RESET
-    # -----------------------------------------
-
-    if (
-        n in {"الغاء", "الغي"}
-        or contains_any(
-            text,
-            [
-                "الغاء الطلب",
-                "إلغاء الطلب",
-                "الغي الطلب",
-                "ابدأ من جديد",
-                "بداية جديدة",
-            ],
-        )
-    ):
-
-        reset(chat_id)
-
-        return (
-            "✅ تمام، لغيت المحادثة الحالية. "
-            "فيك تبدأ من جديد."
-        )
-
-    # -----------------------------------------
-    # CONFIRM / EDIT ORDER
-    # -----------------------------------------
-
-    if (
-        state["done"]
-        and n in CONFIRM_WORDS
-    ):
-
-        return (
-            "طلبك مسجل مسبقاً ✅ "
-            f"رقم الطلب: "
-            f"{state['order_id']}"
-        )
-
-    # Catalog answers and explicit order confirmation stay authoritative.
-    if not is_buy_intent(text) and n not in CONFIRM_WORDS | EDIT_WORDS:
         entries = DEMO_FAQS if source == "demo" else support_store.faqs(approved_only=True)
         faq_answer = find_reviewed_answer(text, entries)
         if faq_answer:
             support_store.count("faq_answers", source or "direct")
             return faq_answer
 
+        if state["buying"] and state["language"] == "en" and (re.search(r"[?؟]", text) or re.match(
+            r"^(?:what|which|when|where|how|is|are|can|could|do|does|will)\b", n
+        )):
+            support_store.count("unknown_questions", source or "direct")
+            reply = "There is no approved answer to that question. Type 'talk to a human' for staff follow-up."
+            if state["buying"]:
+                reply += "\n\n" + (order_prompt(dict(state)) or order_review_text(state))
+            return reply
+
+    if state["done"] and buying:
+        language, channel = state["language"], state["source"]
+        reset(chat_id)
+        state = session(chat_id)
+        state.update({"language": language, "source": channel})
+
+    data_text = order_data_text(text) if buying else text
+    phone = detect_phone(data_text)
+    city = detect_city(data_text)
+    name = explicit_name(data_text)
+    color = detect_color_choice(data_text, product[0] if product else state.get("product"))
+    quantity = quantity_details(data_text, allow_bare=(
+        state.get("order_step") == "quantity"
+        or state["awaiting_confirmation"] and not phone
+    ))
+    if quantity is not None and not 1 <= quantity <= 1_000_000:
+        return say(state, "حدد كمية بين 1 و1000000.", "Please enter a quantity between 1 and 1000000.")
+
+    if state["language"] == "en" and (state["buying"] or buying):
+        if state.get("order_step") == "color" and n in {"skip", "no preference", "no color preference"}:
+            state["color_skipped"] = True
+        elif (state.get("order_step") == "color" or contains_any(text, ["color", "colour"])) and not color and not product and not name and not phone and not city and quantity is None:
+            return "Please choose an available color, or type 'skip'. " + ", ".join(
+                label_text(c, state, state.get("product")) for c in product_colors(state.get("product"))
+            )
+        if state.get("order_step") == "quantity" and quantity is None and not product and not color and not name and not city:
+            return "Please enter a quantity between 1 and 1000000."
+
+    if phone:
+        state["phone"] = phone
+    if city:
+        state["city"] = city
+    if product:
+        if product[0] != state["product"]:
+            state["color_skipped"] = False
+        state["product"] = product[0]
+        if state.get("color") not in product_colors(product[0]):
+            state["color"] = None
+    if color:
+        state["color"] = color
+        state["color_skipped"] = False
+    if name:
+        state["name"] = name
+    if quantity is not None:
+        state["qty"] = quantity
+        state["quantity_set"] = True
+    elif state["buying"] and not phone and contains_any(text, ["الكمية", "الكميه", "العدد"]):
+        state["qty"] = detect_quantity(text)
+
     if state["awaiting_confirmation"]:
-
-        if n in CONFIRM_WORDS:
-
-            return complete_order(
-                state,
-                text,
-            )
-
         if n in EDIT_WORDS:
+            return say(state, "تمام 👍 ابعت المعلومة الجديدة مباشرة، مثلاً:\n• الاسم: أحمد\n• الهاتف: 09xxxxxxxx\n• المدينة: حلب\n• الكمية: 3",
+                       "Send the new details, for example:\n• name: John Smith\n• phone: +447700900123\n• city Aleppo\n• quantity 3\n• color white\n• product Demo product")
+        prompt = order_prompt(state)
+        if prompt:
+            state["awaiting_confirmation"] = False
+            return prompt
+        if n in CONFIRM_WORDS:
+            return complete_order(state, text)
+        return order_review_text(state)
 
-            return (
-                "تمام 👍 ابعت المعلومة الجديدة "
-                "مباشرة، مثلاً:\n"
-                "• الاسم: أحمد\n"
-                "• الهاتف: 09xxxxxxxx\n"
-                "• المدينة: حلب\n"
-                "• الكمية: 3"
-            )
-
-        if (
-            phone
-            or city
-            or product
-            or color
-            or name
-            or contains_any(
-                text,
-                [
-                    "الكمية",
-                    "الكميه",
-                    "العدد",
-                ],
-            )
-        ):
-
-            return order_review_text(
-                state
-            )
-
-        return (
-            "طلبك جاهز للتأكيد 👍\n\n"
-            + order_review_text(state)
-        )
-
-    # -----------------------------------------
-    # GREETING
-    # -----------------------------------------
-
-    if contains_any(
-        text,
-        [
-            "مرحبا",
-            "اهلا",
-            "أهلا",
-            "هلا",
-            "السلام عليكم",
-            "هاي",
-            "hello",
-            "hi",
-        ],
-    ):
-
+    if buying:
         if not state["buying"]:
-
-            return (
-                "أهلاً وسهلاً 👋\n"
-                "فيني أعرض المنتجات والأسعار، "
-                "أخبرك عن التوصيل، "
-                "أو أسجّل لك طلب مباشرة."
-            )
-
-    # -----------------------------------------
-    # HOW MANY PRODUCTS?
-    # -----------------------------------------
-
-    if is_product_count_question(text):
-
-        available = [
-            p
-            for p in PRODUCTS.values()
-            if p.get(
-                "available",
-                True,
-            )
-        ]
-
-        return (
-            f"عندنا حالياً "
-            f"{len(available)} "
-            "منتج/نوع متوفر.\n\n"
-            + product_list_text()
-        )
-
-    # -----------------------------------------
-    # SHOW PRODUCTS
-    # -----------------------------------------
-
-    if is_products_question(text):
-
-        return (
-            product_list_text()
-            + "\n\n"
-            + "إذا بدك واحد منهم، "
-            + "قلي مثلاً: بدي أطلب الجهاز."
-        )
-
-    # -----------------------------------------
-    # GENERIC PRODUCT WORD
-    # -----------------------------------------
-
-    if (
-        n in {
-            "المنتج",
-            "منتج",
-            "الجهاز",
-            "جهاز",
-        }
-        and not state["buying"]
-    ):
-
-        if product:
-
-            data = product[1]
-
-            price = data["price"]
-
-            if float(price).is_integer():
-                price = int(price)
-
-            return (
-                f"{product[0]} متوفر ✅ "
-                f"وسعره {price}"
-                f"{data['currency']}.\n"
-                "إذا بدك تطلبه قلي: "
-                "بدي أطلبه."
-            )
-
-        return product_list_text()
-
-    # -----------------------------------------
-    # START ORDER
-    # -----------------------------------------
-
-    if is_buy_intent(text):
-
+            state["customer_message"] = text
+            if state["language"] != "en":
+                state["qty"] = quantity if quantity is not None else quote_quantity(data_text) or 1
         state["buying"] = True
-
         state["done"] = False
 
-        state["awaiting_confirmation"] = False
-
-        state["customer_message"] = text
-
-        state["qty"] = (
-            detect_quantity(text)
-        )
-
-    # -----------------------------------------
-    # ORDER FLOW
-    # -----------------------------------------
-
     if state["buying"]:
+        # Bare names are accepted only at the English name step; commands and
+        # unknown questions must never become customer names.
+        if state["language"] != "en" or state.get("order_step") == "name":
+            maybe_capture_name(state, text)
+        if not state["product"] and len(PRODUCTS) == 1:
+            state["product"] = next(iter(PRODUCTS))
+        prompt = order_prompt(state)
+        if not prompt:
+            state["awaiting_confirmation"] = True
+            prompt = order_review_text(state)
+        # A purchase and questions in one message both receive a response.
+        information = product_information_answers(text, state, product, source) if buying else []
+        return ("\n".join(information) + "\n\n" if information else "") + prompt
 
-        maybe_capture_name(
-            state,
-            text,
-        )
-
-        # Product missing
-        if not state["product"]:
-
-            if len(PRODUCTS) == 1:
-
-                state["product"] = next(
-                    iter(PRODUCTS)
-                )
-
-            else:
-
-                return (
-                    "تمام 👍 شو المنتج "
-                    "اللي بدك تطلبه؟\n"
-                    + "\n".join(
-                        f"• {name}"
-                        for name in PRODUCTS
-                    )
-                )
-
-        # Name missing
-        if not state["name"]:
-
-            return (
-                "تمام 👍 شو اسمك "
-                "حتى أسجل الطلب؟"
-            )
-
-        # Phone missing
-        if not state["phone"]:
-
-            return (
-                f"تمام {state['name']} 👍 "
-                "ابعتلي رقم الهاتف."
-            )
-
-        # City missing
-        if not state["city"]:
-
-            return (
-                "ممتاز 👍 بقي بس "
-                "أعرف المدينة للتوصيل."
-            )
-
-        # Review before writing the order
-        state["awaiting_confirmation"] = True
-
-        return order_review_text(
-            state
-        )
-
+    if contains_any(text, ["مرحبا", "اهلا", "أهلا", "هلا", "السلام عليكم", "هاي", "hello", "hi"]):
+        return say(state, "أهلاً وسهلاً 👋\nفيني أعرض المنتجات والأسعار، أخبرك عن التوصيل، أو أسجّل لك طلب مباشرة.",
+                   "Hello 👋\nI can show products and prices, explain delivery, or help you place an order.")
+    if product:
+        return product_list_text(state) + say(state, "\n\nإذا بدك تطلبه قلي: بدي أطلبه.",
+                                             "\n\nTo order, say: I want to order the Device.")
     if source == "telegram":
         ai_answer = gemini_reply(text)
         if ai_answer:
             return ai_answer
-
     support_store.count("unknown_questions", source or "direct")
-    return (
-        "ما عندي إجابة مؤكدة عن هالسؤال. اكتب «موظف» لطلب متابعة.\n"
-        "جرب اسألني مثلاً:\n"
-        "• شو المنتجات؟\n"
-        "• كم سعر الجهاز؟\n"
-        "• التوصيل للحسكة؟\n"
-        "• بدي أسجل طلب."
-    )
+    return say(state, "ما عندي إجابة مؤكدة عن هالسؤال. اكتب «موظف» لطلب متابعة.\nجرب اسألني مثلاً:\n• شو المنتجات؟\n• كم سعر الجهاز؟\n• التوصيل للحسكة؟\n• بدي أسجل طلب.",
+               "There is no approved answer to that question. Type 'talk to a human' for staff follow-up.\nTry asking:\n• What products do you sell?\n• How much is the Device?\n• Delivery to Hasakah?\n• I want to place an order.")
 
 
 def handle_message(

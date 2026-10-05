@@ -1,16 +1,18 @@
-# Customer Agent V6.4.2
+# Customer Agent V6.5.0
 
 A Telegram and Facebook Messenger sales assistant that answers product, pricing,
 and delivery questions and records confirmed customer orders.
 
 ## Current behavior
 
-- Answers product, price, and delivery questions in Arabic.
+- Answers product, price, color, payment, and delivery questions in Arabic and English.
+- Handles complete English orders as well as the existing Arabic flow: product,
+  optional color, quantity, name, phone, city, review, confirmation, edits and cancellation.
 - Optionally uses Gemini for open Telegram questions. Catalog answers and order
   confirmation stay in the local sales flow; contact details are not sent to Gemini.
 - Collects product, optional colour, quantity, name, phone, and city.
 - Shows a complete order review before saving.
-- Saves only after the customer writes `تأكيد`, `نعم`, or another supported confirmation.
+- Saves only after the customer writes `تأكيد`, `نعم`, `confirm`, `yes`, or another supported confirmation.
 - Lets the customer change details before confirmation.
 - Persists a selected product colour and shows it in the review, confirmation,
   administration API, and dashboard.
@@ -37,7 +39,7 @@ is optional; the operator interface now also runs inside the core service.
 - Create a question, answer, source title, optional HTTPS source URL, and up to
   20 alternative question phrasings. Entries start as drafts unless approved.
 - Reviewed answers match complete normalized questions/aliases, not semantic
-  search. Add Arabic or English Q&A explicitly; the order workflow remains Arabic.
+  search. Add Arabic or English Q&A explicitly; order conversations support both languages.
 - The reply cites that entry's source. The source title is supplied and reviewed
   by the merchant; V6 does not fetch or independently validate the cited document.
 - A customer can write `موظف` or `talk to a human` to create a private follow-up
@@ -65,6 +67,39 @@ Protected API endpoints, with `X-Admin-Key`:
 
 See [the market comparison](docs/MARKET_COMPARISON_2026-10-05.md) and
 [commercial scope](SALES.md) before using these features in an offer.
+
+## Arabic and English order conversations
+
+The language of an English opening message is remembered across names, numeric
+replies, staff follow-up and service restarts. Arabic remains the default for
+existing sessions. Type `English` or `العربية` to switch explicitly without losing
+an unfinished order. English orders ask for a color (or `skip`) and quantity when
+they are not supplied; the existing Arabic defaults and prompts are preserved.
+
+Example: `I want to order` → `Device` → `white` → `two` → `John Smith` →
+`+447700900123` → `Damascus` → review → `confirm`. Before confirmation, send
+`edit`, `quantity 3`, `name: Sarah Smith`, `phone: +12025550123`, `city Aleppo`,
+`color black`, `product Demo product`, or `cancel order`. A staff request pauses
+confirmation; `back to bot` resumes the same order and shows the next step/review.
+
+Compound catalog/policy questions are answered without changing a pending order.
+Quoted quantities are separated from phone numbers and warranty durations.
+Unapproved warranty, discount, return and free-delivery claims need store confirmation.
+Requests for staff are follow-up tickets, not a live staff connection.
+
+For a custom `PRODUCTS_JSON`, use English product names/aliases, or add optional
+`name_en` and `labels_en` fields to an Arabic catalog. Example:
+
+```json
+{"قميص":{"price":12,"currency":"$","name_en":"Shirt","aliases":["shirt","shirts"],"colors":["كحلي"],"labels_en":{"كحلي":"Navy"}}}
+```
+
+English labels are matched as whole words; the original product/color keys stay
+unchanged in saved orders and operator tools. Common default city names such as
+`Damascus`, `Aleppo`, and `Hasakah` resolve to the existing Arabic city keys.
+Configured English city keys in `DELIVERY_JSON` are accepted directly. Catalog
+labels and merchant FAQ answers need merchant-supplied translations; they are
+not automatically translated by a paid model.
 
 ## Required environment variables
 
@@ -183,6 +218,7 @@ gunicorn --workers 1 --bind 0.0.0.0:$PORT demo_app:demo_app
 ```
 
 - `GET /` opens the interactive demo.
+- `GET /?lang=en` opens the English interface and English example messages.
 - `GET /health` includes the full deployed Render commit.
 - `POST /api/message` and `POST /api/reset` operate a browser demo session.
 - Demo orders and conversation details are not persisted, and the demo worker

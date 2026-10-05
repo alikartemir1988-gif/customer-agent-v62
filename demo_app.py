@@ -50,9 +50,12 @@ def add_security_headers(response):
 
 @demo_app.get("/")
 def demo_home():
+    language = "en" if request.args.get("lang") == "en" else "ar"
     return render_template(
         "demo.html",
         version=customer_agent.APP_VERSION,
+        language=language,
+        t=lambda arabic, english: english if language == "en" else arabic,
     )
 
 
@@ -91,8 +94,15 @@ def demo_message():
 
     session["demo_message_count"] = message_count + 1
 
+    conversation_id = demo_conversation_id()
+    language = payload.get("language")
+    if isinstance(language, str) and language in {"ar", "en"} and customer_agent.session(conversation_id)["language"] != language:
+        customer_agent.handle_message(
+            conversation_id, "English" if language == "en" else "العربية", source="demo"
+        )
+
     reply = customer_agent.handle_message(
-        demo_conversation_id(),
+        conversation_id,
         message,
         source="demo",
     )
