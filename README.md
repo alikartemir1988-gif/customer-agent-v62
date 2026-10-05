@@ -1,4 +1,4 @@
-# Customer Agent V6.4.0
+# Customer Agent V6.4.1
 
 A Telegram and Facebook Messenger sales assistant that answers product, pricing,
 and delivery questions and records confirmed customer orders.

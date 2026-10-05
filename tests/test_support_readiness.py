@@ -140,7 +140,41 @@ class SupportReadinessTests(unittest.TestCase):
         self.assertEqual(agent.support_store.tickets(), [])
 
     def test_negative_staff_request_does_not_open_ticket(self):
-        agent.handle_message("negative", "ما بدي موظف", source="messenger")
+        for i, text in enumerate(("ما بدي موظف", "ما بدي موظف لطلب متابعة",
+                                  "لا أريد موظف لطلب متابعة", "ما بدي طلب موظف")):
+            with self.subTest(text=text):
+                agent.handle_message(f"negative-{i}", text, source="messenger")
+        self.assertEqual(agent.support_store.tickets(), [])
+
+    def test_full_staff_request_phrase_queues_followup_across_channels(self):
+        phrases = ("موظف لطلب متابعة", "موظف لطلب متابعة.", "طلب موظف",
+                   "موظف للمتابعة", "طلب متابعة من موظف")
+        with mock.patch.object(agent, "gemini_reply") as gemini:
+            for channel in ("telegram", "messenger", "botpress"):
+                for i, text in enumerate(phrases):
+                    with self.subTest(channel=channel, text=text):
+                        chat_id = f"full-request-{channel}-{i}"
+                        reply = agent.handle_message(chat_id, text, source=channel)
+                        self.assertIn("طلبك محفوظ للمتابعة من موظف", reply)
+                        ticket = agent.support_store.ticket(agent.session(chat_id)["support_ticket_id"])
+                        self.assertEqual(ticket["messages"][0]["text"], text)
+        gemini.assert_not_called()
+        self.assertEqual(len(agent.support_store.tickets()), len(phrases) * 3)
+
+    def test_demo_accepts_full_staff_request_phrase_and_resumes(self):
+        demo_app.config.update(TESTING=True, SESSION_COOKIE_SECURE=False)
+        client = demo_app.test_client()
+        with mock.patch.object(agent, "GEMINI_API_KEY", ""), \
+                mock.patch.object(agent.support_store, "open_ticket") as open_ticket:
+            fallback = client.post("/api/message", json={"message": "سؤال غير موجود في الديمو"}).get_json()["reply"]
+            self.assertIn("موظف", fallback)
+            handoff = client.post("/api/message", json={"message": "موظف لطلب متابعة"}).get_json()["reply"]
+            self.assertIn("لا يُحفظ طلب حقيقي", handoff)
+            resumed = client.post("/api/message", json={"message": "ارجع للبوت"}).get_json()["reply"]
+            self.assertIn("رجعنا للمساعد", resumed)
+            price = client.post("/api/message", json={"message": "كم سعر الجهاز؟"}).get_json()["reply"]
+            self.assertIn("30$", price)
+        open_ticket.assert_not_called()
         self.assertEqual(agent.support_store.tickets(), [])
 
     def test_demo_uses_fictional_answers_and_never_writes_support_data(self):
