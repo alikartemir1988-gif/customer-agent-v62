@@ -33,7 +33,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Compile application
-        run: python -m py_compile app.py dashboard.py demo_app.py
+        run: python -m py_compile app.py dashboard.py demo_app.py support.py
 
       - name: Validate production entry points
         run: |

@@ -12,6 +12,7 @@ from functools import wraps
 
 import requests
 from flask import Flask, jsonify, request
+from support import DEMO_FAQS, SupportStore, find_reviewed_answer
 
 from observability import (
     customer_message_span,
@@ -53,7 +54,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
 DB_PATH = os.environ.get("DB_PATH", "customer_agent.db").strip()
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
-APP_VERSION = "6.3.2"
+APP_VERSION = "6.4.0"
 GIT_COMMIT = os.environ.get("RENDER_GIT_COMMIT", "").strip()
 
 API = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
@@ -413,6 +414,9 @@ def db_sql(statement):
     return statement
 
 
+support_store = SupportStore(db_connect, db_sql, using_postgres)
+
+
 def init_db():
 
     conn = db_connect()
@@ -529,6 +533,7 @@ def init_db():
         """
     )
 
+    support_store.init_schema(conn)
     conn.commit()
     conn.close()
 
@@ -796,6 +801,7 @@ def default_session_state():
         "awaiting_confirmation": False,
         "customer_message": None,
         "source": "direct",
+        "support_ticket_id": None,
     }
 
 
@@ -1966,6 +1972,42 @@ def gemini_reply(text):
         return None
 
 
+def support_handoff_reply(chat_id, text, state, source):
+    """Queue staff follow-up; never promise a live connection."""
+    n = norm(text)
+    english = bool(re.search(r"[A-Za-z]", text)) and not re.search(r"[\u0600-\u06ff]", text)
+    requested = n in {"موظف", "موظف بشري", "human", "agent", "speak to a human"} or contains_any(
+        text, ["احكي مع موظف", "احكي مع شخص", "بدي موظف", "اكلم موظف", "التحدث مع موظف",
+               "speak to a person", "talk to a human", "talk to an agent", "human agent"]
+    )
+    if contains_any(text, ["ما بدي موظف", "لا اريد موظف", "don't want a human", "do not want a human"]):
+        requested = False
+    ticket_id = state.get("support_ticket_id")
+    if ticket_id and n in {"ارجع للبوت", "عوده للبوت", "resume bot", "back to bot"}:
+        if source != "demo":
+            support_store.close_ticket(ticket_id)
+        state["support_ticket_id"] = None
+        return "You can continue with the bot." if english else "رجعنا للمساعد الآلي. فيك تكمل طلبك أو تسأل عن المنتجات."
+    if ticket_id and source != "demo":
+        ticket = support_store.ticket(ticket_id)
+        if not ticket or ticket["status"] != "open":
+            state["support_ticket_id"] = None
+            ticket_id = None
+    if not requested and not ticket_id:
+        return None
+    if source == "demo":
+        state["support_ticket_id"] = "DEMO-SUPPORT"
+        return ("Demo: a staff follow-up request is simulated. No real ticket is saved. Type 'back to bot' to continue."
+                if english else "تجربة: هذا طلب متابعة للموظف مع سياق المحادثة. لا يُحفظ طلب حقيقي ولا يوجد موظف متصل بالديمو. اكتب: ارجع للبوت لتكمل.")
+    if ticket_id:
+        support_store.append_message(ticket_id, text)
+    else:
+        ticket_id = support_store.open_ticket(chat_id, source or "direct", text, state)
+        state["support_ticket_id"] = ticket_id
+    return (f"Your request is queued for staff follow-up (#{ticket_id}); a live agent is not connected. You can add details here or type 'back to bot'."
+            if english else f"طلبك محفوظ للمتابعة من موظف، رقم {ticket_id}. اكتب تفاصيل المشكلة هنا، أو: ارجع للبوت.")
+
+
 def _handle_message(
     chat_id,
     text,
@@ -1983,6 +2025,10 @@ def _handle_message(
         return (
             "اكتبلي رسالتك حتى أساعدك 👌"
         )
+
+    handoff = support_handoff_reply(chat_id, text, state, source)
+    if handoff:
+        return handoff
 
     # -----------------------------------------
     # Capture useful information
@@ -2082,6 +2128,14 @@ def _handle_message(
         state,
         product,
     )
+
+    # Catalog answers and explicit order confirmation stay authoritative.
+    if not information_answers and not is_buy_intent(text) and n not in CONFIRM_WORDS | EDIT_WORDS:
+        entries = DEMO_FAQS if source == "demo" else support_store.faqs(approved_only=True)
+        faq_answer = find_reviewed_answer(text, entries)
+        if faq_answer:
+            support_store.count("faq_answers", source or "direct")
+            return faq_answer
 
     if state["awaiting_confirmation"]:
 
@@ -2392,8 +2446,9 @@ def _handle_message(
         if ai_answer:
             return ai_answer
 
+    support_store.count("unknown_questions", source or "direct")
     return (
-        "فهمت عليك جزئياً 👌\n"
+        "ما عندي إجابة مؤكدة عن هالسؤال. اكتب: موظف لطلب متابعة.\n"
         "جرب اسألني مثلاً:\n"
         "• شو المنتجات؟\n"
         "• كم سعر الجهاز؟\n"
@@ -3001,6 +3056,55 @@ def admin_stats():
     return jsonify({"ok": True, **order_metrics()})
 
 
+@app.get("/admin/support/faqs")
+@admin_required
+def admin_support_faqs():
+    return jsonify({"faqs": support_store.faqs()})
+
+
+@app.post("/admin/support/faqs")
+@app.put("/admin/support/faqs/<int:faq_id>")
+@admin_required
+def admin_save_support_faq(faq_id=None):
+    try:
+        saved_id = support_store.save_faq(request.get_json(silent=True), faq_id)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    if saved_id is None:
+        return jsonify({"ok": False, "error": "FAQ not found"}), 404
+    return jsonify({"ok": True, "id": saved_id}), (201 if faq_id is None else 200)
+
+
+@app.delete("/admin/support/faqs/<int:faq_id>")
+@admin_required
+def admin_delete_support_faq(faq_id):
+    found = support_store.delete_faq(faq_id)
+    return jsonify({"ok": found}), (200 if found else 404)
+
+
+@app.get("/admin/support/tickets")
+@admin_required
+def admin_support_tickets():
+    try:
+        tickets = support_store.tickets(request.args.get("status", "open"))
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    return jsonify({"tickets": tickets})
+
+
+@app.post("/admin/support/tickets/<int:ticket_id>/close")
+@admin_required
+def admin_close_support_ticket(ticket_id):
+    found = support_store.close_ticket(ticket_id)
+    return jsonify({"ok": found}), (200 if found else 404)
+
+
+@app.get("/admin/support/stats")
+@admin_required
+def admin_support_stats():
+    return jsonify(support_store.metrics())
+
+
 @app.patch("/admin/orders/<int:order_id>/status")
 @admin_required
 def admin_change_order_status(order_id):
@@ -3358,6 +3462,17 @@ def run_langfuse_smoke_tests():
 
 
 init_db()
+
+
+# Use the same service for the protected operator interface. Lazy import also
+# permits the existing standalone dashboard entry point without an import cycle.
+def dashboard_wsgi(environ, start_response):
+    from dashboard import dashboard_app
+    return dashboard_app(environ, start_response)
+
+
+from werkzeug.middleware.dispatcher import DispatcherMiddleware
+app.wsgi_app = DispatcherMiddleware(app.wsgi_app, {"/dashboard": dashboard_wsgi})
 
 
 if __name__ == "__main__":
