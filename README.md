@@ -1,4 +1,4 @@
-# Customer Agent V6.4.1
+# Customer Agent V6.4.2
 
 A Telegram and Facebook Messenger sales assistant that answers product, pricing,
 and delivery questions and records confirmed customer orders.
@@ -21,6 +21,9 @@ and delivery questions and records confirmed customer orders.
 - Supports an optional Botpress evaluation/customer-service layer while keeping this core authoritative.
 - Supports optional fail-open Langfuse tracing with customer content redacted by default.
 - Understands common Arabic quantity, colour, payment, cancellation and multi-question phrases.
+- Combines price, colour, payment and delivery answers in one reply, quotes item
+  totals before shipping/discounts, and flags unconfirmed policies in compound
+  questions. Information inquiries preserve an unfinished order's details.
 - Exposes a protected administration API and a CSRF-protected browser dashboard.
 - Tracks order status changes in an audit trail and reports revenue by currency.
 - Supports validated merchant catalog and delivery configuration without source edits.

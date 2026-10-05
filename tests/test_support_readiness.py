@@ -72,6 +72,15 @@ class SupportReadinessTests(unittest.TestCase):
         self.assertEqual(agent.support_store.metrics()["faq_answers"], 3)
         self.assertIn("not verified", agent.support_store.metrics()["measurement"])
 
+    def test_composite_question_can_use_an_exact_approved_policy_clause(self):
+        self.add_faq()
+        reply = agent.handle_message(
+            "composite-reviewed", "كم سعر الجهاز؟ في ضمان؟", source="telegram"
+        )
+        self.assertIn("30$", reply)
+        self.assertIn("ضمان سنة", reply)
+        self.assertIn("المصدر: سياسة الضمان المعتمدة", reply)
+
     def test_invalid_schema_and_unsafe_sources_are_rejected(self):
         changes = [{"source_url": "javascript:alert(1)"}, {"source_url": "https://secret:password@merchant.example"},
                    {"approved": "false"}, {"aliases": "ضمان"}, {"answer": ""}, {"question": "؟!"}]
