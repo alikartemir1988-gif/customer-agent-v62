@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="ar" dir="rtl">
+<html lang="{{ language }}" dir="{{ 'ltr' if language == 'en' else 'rtl' }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="نسخة تفاعلية تجريبية من وكيل العملاء V6 للمبيعات وخدمة العملاء.">
-  <title>وكيل العملاء V6 — تجربة مباشرة</title>
+  <meta name="description" content="{{ t('نسخة تفاعلية تجريبية من وكيل العملاء V6 للمبيعات وخدمة العملاء.', 'Interactive Customer Agent V6 sales and customer service demo.') }}">
+  <title>{{ t('وكيل العملاء V6 — تجربة مباشرة', 'Customer Agent V6 — Live demo') }}</title>
   <style>
     :root {
       color-scheme: dark;
@@ -123,11 +123,11 @@
       <div class="brand">
         <div class="mark">V6</div>
         <div>
-          <h1>وكيل العملاء V6</h1>
-          <div class="subtitle">تجربة مباشرة للمبيعات وخدمة العملاء</div>
+          <h1>{{ t('وكيل العملاء V6', 'Customer Agent V6') }}</h1>
+          <div class="subtitle">{{ t('تجربة مباشرة للمبيعات وخدمة العملاء', 'Live sales and customer service demo') }}</div>
         </div>
       </div>
-      <div class="badge">● نسخة تجريبية آمنة</div>
+      <div class="badge">{{ t('● نسخة تجريبية آمنة', '● Safe demo') }} · <a href="{{ '/?lang=en' if language == 'ar' else '/' }}" style="color:inherit">{{ t('English', 'العربية') }}</a></div>
     </header>
 
     <section class="layout">
@@ -136,61 +136,63 @@
           <div class="agent">
             <div class="avatar">🤖</div>
             <div>
-              <div class="agent-name">مساعد المبيعات</div>
-              <div class="status">متصل وجاهز للرد</div>
+              <div class="agent-name">{{ t('مساعد المبيعات', 'Sales assistant') }}</div>
+              <div class="status">{{ t('متصل وجاهز للرد', 'Ready to help') }}</div>
             </div>
           </div>
-          <button class="reset" id="reset" type="button">تجربة جديدة</button>
+          <button class="reset" id="reset" type="button">{{ t('تجربة جديدة', 'New demo') }}</button>
         </div>
 
         <div class="messages" id="messages" role="log" aria-live="polite">
           <div class="message bot">
             <div class="mini-avatar">✦</div>
-            <div class="bubble">أهلاً وسهلاً 👋
+            <div class="bubble" dir="auto">{% if language == 'en' %}Hello 👋
+This is the Customer Agent V6 demo.
+Ask about products, prices and delivery, or try placing a fictional order.{% else %}أهلاً وسهلاً 👋
 أنا النسخة التجريبية من وكيل العملاء V6.
-اسألني عن المنتجات والأسعار والتوصيل، أو جرّب تسجيل طلب وهمي.</div>
+اسألني عن المنتجات والأسعار والتوصيل، أو جرّب تسجيل طلب وهمي.{% endif %}</div>
           </div>
         </div>
 
-        <div class="quick" aria-label="رسائل مقترحة">
-          <button type="button" data-message="شو المنتجات المتوفرة؟">المنتجات</button>
-          <button type="button" data-message="كم سعر الجهاز؟">السعر</button>
-          <button type="button" data-message="قديش التوصيل لدمشق؟">التوصيل</button>
-          <button type="button" data-message="بدي جهازين لون أسود">جرّب طلبًا</button>
-          <button type="button" data-message="شو سياسة الضمان؟">إجابة مع مصدر</button>
-          <button type="button" data-message="موظف">طلب موظف</button>
+        <div class="quick" aria-label="{{ t('رسائل مقترحة', 'Suggested messages') }}">
+          <button type="button" data-message="{{ t('شو المنتجات المتوفرة؟', 'What products do you sell?') }}">{{ t('المنتجات', 'Products') }}</button>
+          <button type="button" data-message="{{ t('كم سعر الجهاز؟', 'How much is the device?') }}">{{ t('السعر', 'Price') }}</button>
+          <button type="button" data-message="{{ t('قديش التوصيل لدمشق؟', 'Delivery to Damascus?') }}">{{ t('التوصيل', 'Delivery') }}</button>
+          <button type="button" data-message="{{ t('بدي جهازين لون أسود', 'I want 2 black devices') }}">{{ t('جرّب طلبًا', 'Try an order') }}</button>
+          <button type="button" data-message="{{ t('شو سياسة الضمان؟', 'What is the warranty?') }}">{{ t('إجابة مع مصدر', 'Answer with source') }}</button>
+          <button type="button" data-message="{{ t('موظف', 'talk to a human') }}">{{ t('طلب موظف', 'Staff follow-up') }}</button>
         </div>
 
         <form class="composer" id="form">
-          <textarea id="input" rows="1" maxlength="500" placeholder="اكتب رسالتك هنا…" aria-label="رسالتك"></textarea>
-          <button class="send" id="send" type="submit">إرسال</button>
+          <textarea id="input" rows="1" maxlength="500" placeholder="{{ t('اكتب رسالتك هنا…', 'Write a message…') }}" aria-label="{{ t('رسالتك', 'Your message') }}"></textarea>
+          <button class="send" id="send" type="submit">{{ t('إرسال', 'Send') }}</button>
         </form>
       </div>
 
       <aside class="side">
         <section class="side-card">
-          <h2>ما الذي يعرضه الديمو؟</h2>
+          <h2>{{ t('ما الذي يعرضه الديمو؟', 'What can you try?') }}</h2>
           <ul class="features">
-            <li><span class="check">✓</span><span>فهم أسئلة العميل بالعربية والعبارات العامية.</span></li>
-            <li><span class="check">✓</span><span>عرض المنتجات والأسعار والألوان ومدة التوصيل.</span></li>
-            <li><span class="check">✓</span><span>جمع الطلب ومراجعته قبل التأكيد.</span></li>
-            <li><span class="check">✓</span><span>تعديل البيانات ومنع تكرار الطلب.</span></li>
-            <li><span class="check">✓</span><span>إجابة معتمدة مع ذكر مصدرها عند تطابق السؤال.</span></li>
-            <li><span class="check">✓</span><span>محاكاة طلب متابعة من موظف مع حفظ سياق الطلب في النسخة التشغيلية.</span></li>
+            <li><span class="check">✓</span><span>{{ t('أسئلة وطلبات بالعربية والإنجليزية.', 'Arabic and English questions and orders.') }}</span></li>
+            <li><span class="check">✓</span><span>{{ t('عرض المنتجات والأسعار والألوان ومدة التوصيل.', 'Products, prices, colors and delivery times.') }}</span></li>
+            <li><span class="check">✓</span><span>{{ t('جمع الطلب ومراجعته قبل التأكيد.', 'Order details and review before confirmation.') }}</span></li>
+            <li><span class="check">✓</span><span>{{ t('تعديل البيانات ومنع تكرار الطلب.', 'Edits and protection against repeated confirmation.') }}</span></li>
+            <li><span class="check">✓</span><span>{{ t('إجابة معتمدة مع ذكر مصدرها عند تطابق السؤال.', 'Reviewed answers with sources for matching questions.') }}</span></li>
+            <li><span class="check">✓</span><span>{{ t('محاكاة طلب متابعة من موظف مع حفظ سياق الطلب في النسخة التشغيلية.', 'Simulated staff follow-up; production tickets capture order context.') }}</span></li>
           </ul>
         </section>
 
         <section class="side-card scenario">
-          <h2>سيناريو سريع للتجربة</h2>
+          <h2>{{ t('سيناريو سريع للتجربة', 'Quick example') }}</h2>
           <ol class="steps">
-            <li>اكتب: بدي جهازين.</li>
-            <li>استخدم اسمًا ورقمًا وهميين.</li>
-            <li>اكتب: دمشق، ثم: تأكيد.</li>
+            <li>{{ t('اكتب: بدي جهازين.', 'Type: I want 2 black devices.') }}</li>
+            <li>{{ t('استخدم اسمًا ورقمًا وهميين.', 'Use a fictional name and phone number.') }}</li>
+            <li>{{ t('اكتب: دمشق، ثم: تأكيد.', 'Type: Damascus, then: confirm.') }}</li>
           </ol>
         </section>
 
         <section class="side-card">
-          <p class="notice">هذه بيئة عرض منفصلة. لا تدخل بيانات شخصية حقيقية؛ الطلبات التجريبية لا تُحفظ ولا تصل إلى المتجر.</p>
+          <p class="notice">{{ t('هذه بيئة عرض منفصلة. لا تدخل بيانات شخصية حقيقية؛ الطلبات التجريبية لا تُحفظ ولا تصل إلى المتجر.', 'This is a separate demo. Use fictional details; demo orders are never saved or sent to the store.') }}</p>
         </section>
 
         <div class="version">Customer Agent V{{ version }}</div>
@@ -216,6 +218,7 @@
       }
       const bubble = document.createElement('div');
       bubble.className = 'bubble';
+      bubble.dir = 'auto';
       bubble.textContent = text;
       row.appendChild(bubble);
       messages.appendChild(row);
@@ -236,14 +239,14 @@
         const response = await fetch('/api/message', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: clean })
+          body: JSON.stringify({ message: clean, language: {{ language|tojson }} })
         });
         const data = await response.json();
         typing.remove();
-        addMessage(data.reply || data.error || 'تعذر إكمال الرد الآن.', 'bot');
+        addMessage(data.reply || data.error || {{ t('تعذر إكمال الرد الآن.', 'Unable to complete the reply.')|tojson }}, 'bot');
       } catch (_) {
         typing.remove();
-        addMessage('تعذر الاتصال مؤقتاً. حاول مرة ثانية.', 'bot');
+        addMessage({{ t('تعذر الاتصال مؤقتاً. حاول مرة ثانية.', 'Connection failed. Please try again.')|tojson }}, 'bot');
       } finally {
         send.disabled = false;
         input.focus();
@@ -270,7 +273,7 @@
       reset.disabled = true;
       try { await fetch('/api/reset', { method: 'POST' }); } catch (_) {}
       messages.innerHTML = '';
-      addMessage('بدأنا تجربة جديدة 👋\nشو بتحب تسألني؟', 'bot');
+      addMessage({{ t('بدأنا تجربة جديدة 👋\nشو بتحب تسألني؟', 'New demo started 👋\nWhat would you like to ask?')|tojson }}, 'bot');
       reset.disabled = false;
       input.focus();
     });

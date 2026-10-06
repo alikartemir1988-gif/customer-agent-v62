@@ -9,14 +9,16 @@
 
 ## Suitable buyer
 
-An Arabic-speaking merchant with repetitive catalog/delivery questions and orders
+An Arabic- or English-speaking merchant with repetitive catalog/delivery questions and orders
 arriving through Telegram, who needs a customized, deployed order workflow and
 operator tools. The current core is not a complete global enterprise support suite.
 
 ## Proposed standard delivery, to be agreed in writing
 
 - Deployment and verification of the Customer Agent core.
-- Merchant branding, Arabic wording, product catalog and delivery-area setup.
+- Merchant branding, Arabic/English wording, product catalog and delivery-area setup.
+- Complete Arabic and English order conversations with product, optional color,
+  quantity, contact details, review, explicit confirmation, edits and cancellation.
 - Telegram bot integration and explicit order review/confirmation.
 - Protected order API, status history, and operator dashboard.
 - Initial merchant-reviewed FAQ setup, including source labels/links.
@@ -39,12 +41,13 @@ Gemini is unavailable; free-tier limits and availability still apply.
 Messenger webhook support exists in code; a buyer's page/account connection must
 be configured and verified before selling it as an active integration. WhatsApp,
 voice, CRM/ERP connections, website crawling/PDF ingestion, semantic knowledge
-search, full English order conversations, SSO/team roles, and ongoing managed
+search, SSO/team roles, and ongoing managed
 support require separately agreed work. Do not describe them as delivered features.
 
 ## Claims we can demonstrate
 
-- Arabic catalog, delivery and order confirmation examples.
+- Arabic and English catalog, delivery and complete order conversation examples.
+- English public demo interface at `/?lang=en`; both languages use the same core.
 - Only approved FAQ entries are used for exact question/alias matches, with a
   source title and optional link. Source documents are merchant supplied.
 - A customer's staff request creates a persistent private follow-up ticket.
