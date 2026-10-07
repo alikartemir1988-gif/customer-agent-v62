@@ -49,6 +49,9 @@ class GeminiIntegrationTests(unittest.TestCase):
         self.assertEqual(post.call_args.kwargs["timeout"], (3, 12))
         self.assertIn("الجهاز", post.call_args.kwargs["json"]["systemInstruction"]["parts"][0]["text"])
         self.assertEqual(post.call_args.kwargs["headers"]["x-goog-api-key"], "test-key")
+        config = post.call_args.kwargs["json"]["generationConfig"]
+        self.assertNotIn("temperature", config)
+        self.assertEqual(config["thinkingConfig"], {"thinkingLevel": "minimal"})
         self.assertEqual(
             post.call_args.kwargs["json"]["contents"][0]["parts"][0]["text"],
             "في ضمان؟",

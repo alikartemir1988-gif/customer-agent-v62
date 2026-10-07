@@ -54,7 +54,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
 DB_PATH = os.environ.get("DB_PATH", "customer_agent.db").strip()
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
-APP_VERSION = "6.5.1"
+APP_VERSION = "6.5.2"
 GIT_COMMIT = os.environ.get("RENDER_GIT_COMMIT", "").strip()
 
 API = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
@@ -1173,17 +1173,25 @@ def explicit_name(text):
 # INTENTS
 # =========================================================
 
+def is_purchase_decline(text):
+    n = norm(text)
+    return bool(re.search(
+        r"(?:^|\s)(?:ما|لا|مو|لست)\s+"
+        r"(?:(?:بدي|بدنا|اريد|حابب|حابه|حاب)\s+)?(?:ان\s+)?"
+        r"(?:اشتري|اطلب|شراء|طلب|جهاز|الجهاز|منتج|المنتج)(?!\w)",
+        n,
+    ) or re.search(
+        r"\b(?:do not|don t|not|never)\s+(?:want(?:\s+to)?\s+)?"
+        r"(?:(?:a|an|the|any)\s+)?(?:buy|order|purchase|device|product)\b", n,
+    ))
+
+
 def is_buy_intent(text):
 
     n = norm(text)
 
     # Asking how to buy, or explicitly declining a purchase, is not consent.
-    if re.search(
-        r"(?:^|\s)(?:ما|لا|مو|لست)\s+"
-        r"(?:(?:بدي|بدنا|اريد|حابب|حابه|حاب)\s+)?(?:ان\s+)?"
-        r"(?:اشتري|اطلب|شراء|طلب|جهاز|الجهاز|منتج|المنتج)(?!\w)",
-        n,
-    ) or re.match(
+    if is_purchase_decline(text) or re.match(
         r"^(?:كيف|هل|ليش|لماذا|متي|اين|شو|ما هي|ما هو)\b"
         r"|^(?:بدي|اريد)\s+(?:اعرف|اسال|افهم)\b", n,
     ):
@@ -2226,6 +2234,14 @@ def gemini_reply(text):
         f"بيانات المتجر: {facts}"
     )
 
+    generation_config = {"maxOutputTokens": 500}
+    if GEMINI_MODEL.startswith("gemini-3"):
+        # Gemini 3's reasoning is tuned for its default sampling settings.
+        if re.match(r"gemini-3\.\d+-flash-lite(?:-|$)", GEMINI_MODEL):
+            generation_config["thinkingConfig"] = {"thinkingLevel": "minimal"}
+    else:
+        generation_config["temperature"] = 0.3
+
     try:
         response = requests.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
@@ -2236,7 +2252,7 @@ def gemini_reply(text):
             json={
                 "systemInstruction": {"parts": [{"text": instructions}]},
                 "contents": [{"role": "user", "parts": [{"text": text}]}],
-                "generationConfig": {"temperature": 0.3, "maxOutputTokens": 500},
+                "generationConfig": generation_config,
             },
             timeout=(3, 12),
         )
@@ -2384,6 +2400,8 @@ def _handle_message(chat_id, text, source=None):
     )) or n in {"الغاء", "الغي"} or contains_any(
         text, ["الغاء الطلب", "الغي الطلب", "ابدأ من جديد", "بداية جديدة"]
     )
+    if state["buying"] and not state["done"] and is_purchase_decline(text):
+        cancelling = True
     if cancelling:
         language, channel = state["language"], state["source"]
         reset(chat_id)
