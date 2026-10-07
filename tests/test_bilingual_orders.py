@@ -203,6 +203,25 @@ class BilingualOrderTests(unittest.TestCase):
                     self.assertEqual(agent.session(chat), before)
                 self.assertEqual(self.rows(), [])
 
+    def test_explicit_purchase_refusal_ends_pending_order_in_both_languages(self):
+        for language, command in (("ar", "ما بدي اشتري، بس عندي سؤال عن السفر للمريخ؟"),
+                                  ("en", "I don't want to buy. Can it sing?")):
+            with self.subTest(language=language):
+                self.review(language, language)
+                answer = self.send(command, language)
+                self.assertIn("لغيت" if language == "ar" else "cancelled", answer)
+                self.assertFalse(agent.session(language)["buying"])
+                self.assertFalse(agent.session(language)["awaiting_confirmation"])
+                self.assertIsNone(agent.session(language)["name"])
+                self.assertEqual(self.rows(), [])
+
+    def test_declining_discount_does_not_cancel_the_pending_order(self):
+        self.review()
+        before = dict(agent.session("customer"))
+        self.send("I don't want a discount.")
+        self.assertEqual(agent.session("customer"), before)
+        self.assertEqual(self.rows(), [])
+
     def test_compound_information_does_not_mutate_order_in_either_language(self):
         questions = {
             "en": "How much are two devices, what colors are available, and delivery to Aleppo? Is there a warranty? Is delivery free?",
