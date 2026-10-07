@@ -30,8 +30,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Compile sales service
-        run: python -m py_compile majd_sales_bot.py
+        run: python -m py_compile majd_sales_bot.py scripts/verify_majd_release.py
       - name: Validate production entry point
         run: python -m gunicorn --check-config majd_sales_bot:app
       - name: Run sales regressions
-        run: python -m unittest discover -s tests -p test_majd_sales_bot.py -v
+        run: python -m unittest discover -s tests -p 'test_majd*.py' -v
