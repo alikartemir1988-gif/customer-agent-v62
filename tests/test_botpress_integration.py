@@ -14,6 +14,7 @@ import app as customer_agent
 
 class BotpressIntegrationTests(unittest.TestCase):
     def setUp(self):
+        customer_agent.ensure_db_initialized()
         self.client = customer_agent.app.test_client()
         customer_agent.BOTPRESS_INTEGRATION_SECRET = "test-botpress-secret"
         customer_agent.SESSIONS.clear()

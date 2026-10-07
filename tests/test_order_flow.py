@@ -15,6 +15,7 @@ import app as customer_agent
 class OrderFlowTests(unittest.TestCase):
 
     def setUp(self):
+        customer_agent.ensure_db_initialized()
         customer_agent.SESSIONS.clear()
 
         with sqlite3.connect(customer_agent.DB_PATH) as conn:

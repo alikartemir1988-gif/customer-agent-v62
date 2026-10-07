@@ -1,4 +1,4 @@
-# Customer Agent V6.5.0
+# Customer Agent V6.5.4
 
 A Telegram and Facebook Messenger sales assistant that answers product, pricing,
 and delivery questions and records confirmed customer orders.
@@ -224,7 +224,12 @@ gunicorn --workers 1 --bind 0.0.0.0:$PORT demo_app:demo_app
 - `GET /?lang=en` opens the English interface and English example messages.
 - `GET /health` includes the full deployed Render commit.
 - `POST /api/message` and `POST /api/reset` operate a browser demo session.
+- The demo starts and handles sessions, messages, and resets without a database,
+  even if `DATABASE_URL` is absent or points to an unavailable database. Its
+  conversations live only in worker memory; restarting the worker clears them.
 - Demo orders and conversation details are not persisted, and the demo worker
-  does not register the production Telegram webhook.
+  does not register the production Telegram webhook. Production workers still
+  initialize durable storage on startup; database helpers also initialize it on
+  first use when running without Gunicorn lifecycle hooks.
 
 Use `main` for both Render services to keep future releases aligned.

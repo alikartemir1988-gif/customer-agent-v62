@@ -96,7 +96,11 @@ def demo_message():
 
     conversation_id = demo_conversation_id()
     language = payload.get("language")
-    if isinstance(language, str) and language in {"ar", "en"} and customer_agent.session(conversation_id)["language"] != language:
+    if (
+        isinstance(language, str)
+        and language in {"ar", "en"}
+        and customer_agent.session(conversation_id, source="demo")["language"] != language
+    ):
         customer_agent.handle_message(
             conversation_id, "English" if language == "en" else "العربية", source="demo"
         )
@@ -114,7 +118,7 @@ def demo_message():
 def demo_reset():
     conversation_id = session.get("demo_conversation_id")
     if conversation_id:
-        customer_agent.reset(f"demo:{conversation_id}")
+        customer_agent.reset(f"demo:{conversation_id}", source="demo")
 
     session.clear()
     return jsonify({"ok": True})
