@@ -125,6 +125,9 @@ not automatically translated by a paid model.
   Telegram uses the local replies. A free-tier key is subject to Google quotas.
 - `GEMINI_MODEL`: Defaults to `gemini-3.5-flash-lite`. Set it only to a model
   available to the project's free tier if billing must remain disabled.
+- `GEMINI_RUN_SMOKE_TESTS`: Defaults to `false`. Temporarily enable for deployment
+  QA: three fixed synthetic questions call Gemini and log their replies without
+  creating customer sessions or orders. Disable after checking the results.
 - `LANGFUSE_CAPTURE_CONTENT`: Defaults to `false`; enable only for synthetic or consented conversations.
 - `META_GRAPH_VERSION`: Graph API version used for replies (default: `v23.0`).
 - `DB_PATH`: SQLite database path used only when `DATABASE_URL` is absent
