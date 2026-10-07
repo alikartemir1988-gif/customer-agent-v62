@@ -1,0 +1,54 @@
+name: Majd live verification
+
+on:
+  push:
+    branches:
+      - fix/majd-live-verify
+        pull_request:
+    branches:
+      - fix/majd-live-verify
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      MAJD_TELEGRAM_BOT_TOKEN: ''
+      MAJD_WEBHOOK_URL: ''
+      DATABASE_URL: ''
+      MAJD_RUN_GEMINI_SMOKE_TESTS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compile sales service
+        run: python -m py_compile majd_sales_bot.py
+      - name: Validate production entry point
+        run: python -m gunicorn --check-config majd_sales_bot:app
+      - name: Run sales regressions
+        run: python -m unittest discover -s tests -p test_majd_sales_bot.py -v
+      - name: Check live Majd release metadata
+        run: |
+          python - <<'PYCODE'
+          import json, time, urllib.request
+          expected = 'de9eb639648a4cad25cdbd9924b7937effb73522'
+          for attempt in range(6):
+              try:
+                  with urllib.request.urlopen('https://majd-v6-sales-bot.onrender.com/health', timeout=20) as response:
+                      health = json.load(response)
+                  print('Live Majd health: ' + json.dumps({k: health.get(k) for k in ('status', 'version', 'commit', 'ai_engine', 'gemini_model')}, ensure_ascii=False), flush=True)
+                  if health.get('status') == 'ok' and health.get('commit') == expected:
+                      break
+              except Exception as exc:
+                  print('Health attempt: ' + type(exc).__name__, flush=True)
+              time.sleep(5)
+          else:
+              raise SystemExit('Could not verify the expected live release')
+          PYCODE
