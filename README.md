@@ -3,6 +3,20 @@
 A Telegram and Facebook Messenger sales assistant that answers product, pricing,
 and delivery questions and records confirmed customer orders.
 
+## Recent fixes
+
+- **6.5.1:** Questions and purchase refusals cannot become customer names or other
+  order details. Gemini validation rejects incomplete/blocked replies and false
+  order-confirmation claims, and excludes thought parts and malformed text.
+- **6.5.2:** An explicit refusal to buy cancels a pending order in Arabic or English;
+  declining a discount keeps the order intact.
+- **6.5.3:** Questions about unavailable products do not select a catalog item or
+  start an order. Open Telegram questions use Gemini when available or a local
+  fallback, while preserving pending order details. Delivery reminders explicitly
+  refer to the previous pending order.
+- **6.5.4:** The public demo starts, chats, and resets without database access;
+  demo conversations stay in worker memory and production storage remains durable.
+
 ## Current behavior
 
 - Answers product, price, color, payment, and delivery questions in Arabic and English.
@@ -161,6 +175,8 @@ python -m unittest discover -s tests -v
 ```
 
 Tests also run automatically on every push and pull request.
+The regression suite checks that this README's release heading matches
+`APP_VERSION` in `app.py`.
 
 ## Health checks
 
