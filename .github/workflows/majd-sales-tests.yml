@@ -1,0 +1,37 @@
+name: Majd sales tests
+
+on:
+  push:
+    branches:
+      - majd-sales-bot
+      - 'fix/majd-*'
+  pull_request:
+    branches:
+      - majd-sales-bot
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      MAJD_TELEGRAM_BOT_TOKEN: ''
+      MAJD_WEBHOOK_URL: ''
+      DATABASE_URL: ''
+      MAJD_RUN_GEMINI_SMOKE_TESTS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compile sales service
+        run: python -m py_compile majd_sales_bot.py
+      - name: Validate production entry point
+        run: python -m gunicorn --check-config majd_sales_bot:app
+      - name: Run sales regressions
+        run: python -m unittest discover -s tests -p test_majd_sales_bot.py -v
