@@ -56,13 +56,13 @@ must not receive production webhook traffic.
 
 ```sh
 docker run --env-file /private/v6-staging.env \
-  -e APP_SERVICE=core -e TELEGRAM_REGISTER_WEBHOOK_ON_START=false \
+  -e PORT=8080 -e APP_SERVICE=core -e TELEGRAM_REGISTER_WEBHOOK_ON_START=false \
   -p 8080:8080 customer-agent-v6
 docker run --env-file /private/v6-demo.env \
-  -e APP_SERVICE=demo -e DEMO_COOKIE_SECURE=true \
+  -e PORT=8080 -e APP_SERVICE=demo -e DEMO_COOKIE_SECURE=true \
   -p 8081:8080 customer-agent-v6
 docker run --env-file /private/v6-staging.env \
-  -e APP_SERVICE=dashboard -p 8082:8080 customer-agent-v6
+  -e PORT=8080 -e APP_SERVICE=dashboard -p 8082:8080 customer-agent-v6
 ```
 
 Place the services behind HTTPS. Give demo a stable, independent

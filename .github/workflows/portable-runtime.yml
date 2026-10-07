@@ -33,6 +33,11 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
+      - name: Type-check Supabase function
+        working-directory: supabase/functions/v6-storage-readiness
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm exec --yes --package=deno@2.9.6 -- deno check --node-modules-dir=manual index.ts
       - name: Test Supabase storage function
         run: node --test supabase/functions/v6-storage-readiness/handler_test.mjs
       - name: Build portable image
