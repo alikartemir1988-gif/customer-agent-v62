@@ -15,10 +15,13 @@ def post_worker_init(worker):
         BOT_TOKEN,
         WEBHOOK_SECRET,
         WEBHOOK_URL,
+        ensure_db_initialized,
         register_webhook,
         run_gemini_smoke_tests,
         run_langfuse_smoke_tests,
     )
+
+    ensure_db_initialized()
 
     if os.environ.get("LANGFUSE_RUN_SMOKE_TESTS", "").strip().lower() in (
         "1", "true", "yes", "on"
