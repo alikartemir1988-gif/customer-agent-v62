@@ -40,7 +40,7 @@ def main():
 
     status, body, _ = call(8080, "/")
     assert status == 200 and json.loads(body)["commit"] == commit[:7]
-    assert call(8080, "/telegram", {})[0] == 401
+    assert call(8080, "/telegram", {})[0] == 403
 
     status, body, _ = call(8081, "/")
     assert status == 200 and "<!doctype html>" in body.lower()

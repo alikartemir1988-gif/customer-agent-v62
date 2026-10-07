@@ -1,16 +1,17 @@
 import { createReadinessHandler } from "./handler.mjs";
+import postgres from "npm:postgres@3.4.7";
 
-// Built-in server credentials stay inside Supabase; nothing is sent to Render.
-let apiKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-if (!apiKey) {
-  try {
-    apiKey = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "{}").default ?? "";
-  } catch {
-    apiKey = "";
-  }
-}
+// The built-in connection stays inside Supabase. No Render or Data API dependency.
+const connectionString = Deno.env.get("SUPABASE_DB_URL") ?? "";
+const sql = connectionString ? postgres(connectionString, {
+  prepare: false,
+  max: 1,
+  connect_timeout: 5,
+  idle_timeout: 5,
+  connection: { application_name: "v6-storage-readiness", statement_timeout: 5000 },
+}) : null;
 
-Deno.serve(createReadinessHandler({
-  url: Deno.env.get("SUPABASE_URL") ?? "",
-  apiKey,
-}));
+Deno.serve(createReadinessHandler(sql ? async () => {
+  // Confirms table access without retrieving or returning customer records.
+  await sql`SELECT 1 FROM public.orders WHERE false`;
+} : null));

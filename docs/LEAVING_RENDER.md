@@ -17,8 +17,8 @@ The backup is kept privately outside this public repository.
 ## Native Supabase component
 
 `v6-storage-readiness` is a read-only Edge Function deployed to the existing
-project with JWT verification enabled. It uses built-in server credentials
-to issue a zero-row HEAD request to the database API. It returns only storage
+project with JWT verification enabled. It uses the built-in database connection
+to run a zero-row SQL probe. It returns only storage
 status, never orders, messages, credentials or upstream errors. It does not
 call Render and does not implement the sales bot.
 
