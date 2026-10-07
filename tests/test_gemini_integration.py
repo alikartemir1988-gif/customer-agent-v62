@@ -83,6 +83,25 @@ class GeminiIntegrationTests(unittest.TestCase):
             )
             post.assert_not_called()
 
+    def test_unknown_product_question_reaches_gemini_without_an_active_order(self):
+        for language, question, expected in (
+            ("ar", "عندكم جهاز بيحول الهواء لذهب", "لا، ما عنا هيك جهاز."),
+            ("en", "Do you have a device that turns air into gold?", "No such device is available."),
+        ):
+            with self.subTest(language=language):
+                chat = f"gemini-fresh-product:{language}"
+                customer_agent.session(chat).update({"language": language, "source": "telegram"})
+                before = dict(customer_agent.session(chat))
+                with (
+                    mock.patch.object(customer_agent, "GEMINI_API_KEY", "test-key"),
+                    mock.patch.object(customer_agent.requests, "post", return_value=self.gemini_response(expected)) as post,
+                ):
+                    answer = customer_agent.handle_message(chat, question, source="telegram")
+                self.assertEqual(answer, expected)
+                self.assertEqual(customer_agent.session(chat), before)
+                self.assertEqual(post.call_args.kwargs["json"]["contents"][0]["parts"][0]["text"], question)
+                post.assert_called_once()
+
     def test_gemini_rate_limit_keeps_local_reply(self):
         with (
             mock.patch.object(customer_agent, "GEMINI_API_KEY", "test-key"),
