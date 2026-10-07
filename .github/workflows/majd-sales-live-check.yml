@@ -1,0 +1,33 @@
+name: Majd live verification
+
+on:
+  push:
+    branches:
+      - majd-sales-bot
+
+permissions:
+  contents: read
+
+concurrency:
+  group: majd-live-verification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check live Majd release metadata
+        env:
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          python scripts/verify_majd_release.py \
+            --health-url https://majd-v6-sales-bot.onrender.com/health \
+            --expected-commit "$EXPECTED_COMMIT" \
+            --wait-seconds 600 \
+            --poll-interval 10 \
+            --request-timeout 20
