@@ -128,6 +128,26 @@ class DemoAppTests(unittest.TestCase):
                 else:
                     thread.assert_not_called()
 
+    def test_staging_initializes_storage_without_changing_live_webhook(self):
+        hook = runpy.run_path(
+            str(Path(__file__).resolve().parents[1] / "gunicorn.conf.py")
+        )["post_worker_init"]
+        with (
+            patch.dict(os.environ, {"TELEGRAM_REGISTER_WEBHOOK_ON_START": "false",
+                                    "GEMINI_RUN_SMOKE_TESTS": "false",
+                                    "LANGFUSE_RUN_SMOKE_TESTS": "false"}),
+            patch.dict(sys.modules),
+            patch.object(customer_agent, "BOT_TOKEN", "test-bot-token"),
+            patch.object(customer_agent, "WEBHOOK_URL", "https://staging.example"),
+            patch.object(customer_agent, "WEBHOOK_SECRET", "test-webhook-secret"),
+            patch.object(customer_agent, "ensure_db_initialized") as initialize,
+            patch.object(customer_agent, "register_webhook") as register,
+        ):
+            sys.modules.pop("demo_app", None)
+            hook(Mock())
+        initialize.assert_called_once_with()
+        register.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -16,7 +16,8 @@ demo_app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=(
-        os.environ.get("RENDER", "").lower() == "true"
+        os.environ.get("DEMO_COOKIE_SECURE", "").lower() in {"1", "true", "yes", "on"}
+        or os.environ.get("RENDER", "").lower() == "true"
     ),
 )
 

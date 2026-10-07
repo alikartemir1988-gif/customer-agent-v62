@@ -1,0 +1,5 @@
+project_id = "customer-agent-v6"
+
+[functions.v6-storage-readiness]
+verify_jwt = true
+entrypoint = "./functions/v6-storage-readiness/index.ts"

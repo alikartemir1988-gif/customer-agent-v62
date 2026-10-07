@@ -1,0 +1,70 @@
+name: Portable runtime
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  portable-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci-disposable-only
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Test Supabase storage function
+        run: node --test supabase/functions/v6-storage-readiness/handler_test.mjs
+      - name: Build portable image
+        run: docker build --build-arg APP_GIT_COMMIT="$GITHUB_SHA" -t v6-portable .
+      - name: Start three staged services
+        run: |
+          docker run -d --name v6-core --network host \
+            -e PORT=8080 -e APP_SERVICE=core \
+            -e DATABASE_URL=postgresql://ci:ci-disposable-only@127.0.0.1:5432/ci \
+            -e TELEGRAM_BOT_TOKEN=ci-token -e WEBHOOK_URL=https://ci.example \
+            -e TELEGRAM_WEBHOOK_SECRET=ci-webhook-secret \
+            -e ADMIN_API_KEY=ci-admin -e DASHBOARD_SESSION_SECRET=ci-session \
+            v6-portable
+          docker run -d --name v6-demo --network host \
+            -e PORT=8081 -e APP_SERVICE=demo \
+            -e DATABASE_URL=postgresql://unreachable.invalid/unused \
+            -e DEMO_SESSION_SECRET=ci-demo-session v6-portable
+          python -c "from scripts.verify_portable_runtime import wait_ready; wait_ready(8080, '/ready')"
+          docker run -d --name v6-dashboard --network host \
+            -e PORT=8082 -e APP_SERVICE=dashboard \
+            -e DATABASE_URL=postgresql://ci:ci-disposable-only@127.0.0.1:5432/ci \
+            -e ADMIN_API_KEY=ci-admin -e DASHBOARD_SESSION_SECRET=ci-session \
+            v6-portable
+      - name: Verify HTTP behavior and container health
+        run: |
+          python scripts/verify_portable_runtime.py
+          docker exec v6-core python scripts/check_runtime_health.py
+          docker exec v6-demo python scripts/check_runtime_health.py
+          docker exec v6-dashboard python scripts/check_runtime_health.py
+      - name: Show diagnostic logs on failure
+        if: failure()
+        run: |
+          docker logs --tail 60 v6-core || true
+          docker logs --tail 60 v6-demo || true
+          docker logs --tail 60 v6-dashboard || true
