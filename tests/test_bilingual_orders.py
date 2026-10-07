@@ -203,6 +203,35 @@ class BilingualOrderTests(unittest.TestCase):
                     self.assertEqual(agent.session(chat), before)
                 self.assertEqual(self.rows(), [])
 
+    def test_unknown_product_question_has_safe_fallback_in_fresh_conversation(self):
+        for source in ("telegram", "messenger", "botpress", "demo"):
+            with self.subTest(source=source):
+                chat = f"fresh-product-question:{source}"
+                agent.session(chat)["source"] = source
+                before = dict(agent.session(chat))
+                reply = self.send("عندكم جهاز بيحول الهواء لذهب", chat, source)
+                self.assertIn("ما عندي إجابة مؤكدة", reply)
+                self.assertNotIn("المنتجات المتوفرة حالياً", reply)
+                self.assertEqual(agent.session(chat), before)
+                self.assertEqual(self.rows(), [])
+
+    def test_question_at_delivery_step_explains_followup_without_changing_order(self):
+        self.ai.return_value = "لا، ما عنا هيك جهاز."
+        for source in ("telegram", "messenger", "botpress", "demo"):
+            with self.subTest(source=source):
+                chat = f"pending-city-question:{source}"
+                for text in ("بدي أطلب الجهاز", "اسمي أحمد خالد", "0933123456"):
+                    self.send(text, chat, source)
+                self.assertEqual(agent.session(chat)["order_step"], "city")
+                before = dict(agent.session(chat))
+                self.ai.reset_mock()
+                reply = self.send("عندكم جهاز بيحول الهواء لذهب", chat, source)
+                self.assertIn("إذا بدك تكمّل طلبك السابق", reply)
+                self.assertIn("المدينة للتوصيل", reply)
+                self.assertEqual(self.ai.call_count, 1 if source == "telegram" else 0)
+                self.assertEqual(agent.session(chat), before)
+                self.assertEqual(self.rows(), [])
+
     def test_explicit_purchase_refusal_ends_pending_order_in_both_languages(self):
         for language, command in (("ar", "ما بدي اشتري، بس عندي سؤال عن السفر للمريخ؟"),
                                   ("en", "I don't want to buy. Can it sing?")):

@@ -54,7 +54,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
 DB_PATH = os.environ.get("DB_PATH", "customer_agent.db").strip()
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
-APP_VERSION = "6.5.2"
+APP_VERSION = "6.5.3"
 GIT_COMMIT = os.environ.get("RENDER_GIT_COMMIT", "").strip()
 
 API = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
@@ -2318,6 +2318,14 @@ def is_open_question(text):
     ))
 
 
+def unanswered_question_reply(state):
+    if state["buying"]:
+        return say(state, "ما عندي إجابة مؤكدة عن هالسؤال. اكتب «موظف» لطلب متابعة.",
+                   "There is no approved answer to that question. Type 'talk to a human' for staff follow-up.")
+    return say(state, "ما عندي إجابة مؤكدة عن هالسؤال. اكتب «موظف» لطلب متابعة.\nجرب اسألني مثلاً:\n• شو المنتجات؟\n• كم سعر الجهاز؟\n• التوصيل للحسكة؟\n• بدي أسجل طلب.",
+               "There is no approved answer to that question. Type 'talk to a human' for staff follow-up.\nTry asking:\n• What products do you sell?\n• How much is the Device?\n• Delivery to Hasakah?\n• I want to place an order.")
+
+
 def support_handoff_reply(chat_id, text, state, source):
     """Queue staff follow-up; never promise a live connection."""
     n = norm(text)
@@ -2440,13 +2448,15 @@ def _handle_message(chat_id, text, source=None):
             support_store.count("faq_answers", source or "direct")
             return faq_answer
 
-        if state["buying"] and is_open_question(text):
+        if is_open_question(text):
             reply = gemini_reply(text) if source == "telegram" else None
             if not reply:
                 support_store.count("unknown_questions", source or "direct")
-                reply = say(state, "ما عندي إجابة مؤكدة عن هالسؤال. اكتب «موظف» لطلب متابعة.",
-                            "There is no approved answer to that question. Type 'talk to a human' for staff follow-up.")
-            reply += "\n\n" + (order_prompt(dict(state)) or order_review_text(state))
+                reply = unanswered_question_reply(state)
+            if state["buying"]:
+                reply += "\n\n" + say(state, "إذا بدك تكمّل طلبك السابق:\n",
+                                         "To continue your pending order:\n")
+                reply += order_prompt(dict(state)) or order_review_text(state)
             return reply
 
     if state["done"] and buying:
@@ -2544,8 +2554,7 @@ def _handle_message(chat_id, text, source=None):
         if ai_answer:
             return ai_answer
     support_store.count("unknown_questions", source or "direct")
-    return say(state, "ما عندي إجابة مؤكدة عن هالسؤال. اكتب «موظف» لطلب متابعة.\nجرب اسألني مثلاً:\n• شو المنتجات؟\n• كم سعر الجهاز؟\n• التوصيل للحسكة؟\n• بدي أسجل طلب.",
-               "There is no approved answer to that question. Type 'talk to a human' for staff follow-up.\nTry asking:\n• What products do you sell?\n• How much is the Device?\n• Delivery to Hasakah?\n• I want to place an order.")
+    return unanswered_question_reply(state)
 
 
 def handle_message(
