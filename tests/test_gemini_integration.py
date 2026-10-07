@@ -159,6 +159,81 @@ class GeminiIntegrationTests(unittest.TestCase):
 
         self.assertIn("جرب اسألني", answer)
 
+    def test_incomplete_or_blocked_generations_use_local_fallback(self):
+        for reason in ("MAX_TOKENS", "SAFETY", "RECITATION", "OTHER"):
+            with self.subTest(reason=reason):
+                response = self.gemini_response("An unfinished or blocked answer")
+                response.json.return_value["candidates"][0]["finishReason"] = reason
+                with (
+                    mock.patch.object(customer_agent, "GEMINI_API_KEY", "test-key"),
+                    mock.patch.object(customer_agent.requests, "post", return_value=response),
+                ):
+                    self.assertIsNone(customer_agent.gemini_reply("في ضمان؟"))
+
+    def test_thought_parts_never_appear_in_customer_answer(self):
+        response = self.gemini_response("Public answer")
+        response.json.return_value["candidates"][0].update({
+            "finishReason": "STOP",
+            "content": {"parts": [
+                {"text": "Internal thought", "thought": True},
+                {"text": "Public answer"},
+                {"text": 123},
+            ]},
+        })
+        with (
+            mock.patch.object(customer_agent, "GEMINI_API_KEY", "test-key"),
+            mock.patch.object(customer_agent.requests, "post", return_value=response),
+        ):
+            self.assertEqual(customer_agent.gemini_reply("في ضمان؟"), "Public answer")
+
+    def test_english_order_claims_are_rejected(self):
+        for claim in ("Your order is confirmed.", "The order has been registered.",
+                      "I've saved your order.", "We have placed your order."):
+            with (
+                self.subTest(claim=claim),
+                mock.patch.object(customer_agent, "GEMINI_API_KEY", "test-key"),
+                mock.patch.object(customer_agent.requests, "post", return_value=self.gemini_response(claim)),
+            ):
+                self.assertIsNone(customer_agent.gemini_reply("Can you tell me a joke?"))
+
+    def test_authentication_and_payment_data_never_leave_the_app(self):
+        for text in ("verification code is 123", "my credit card expires soon",
+                     "my API key is secret", "my token is confidential"):
+            with (
+                self.subTest(text=text),
+                mock.patch.object(customer_agent, "GEMINI_API_KEY", "test-key"),
+                mock.patch.object(customer_agent.requests, "post") as post,
+            ):
+                self.assertIsNone(customer_agent.gemini_reply(text))
+                post.assert_not_called()
+
+    def test_open_question_during_arabic_order_uses_gemini_without_changing_details(self):
+        customer_agent.handle_message("gemini-active", "بدي أطلب الجهاز", source="telegram")
+        before = dict(customer_agent.session("gemini-active"))
+        with (
+            mock.patch.object(customer_agent, "GEMINI_API_KEY", "test-key"),
+            mock.patch.object(customer_agent.requests, "post", return_value=self.gemini_response("لا توجد معلومات عن الغناء.")),
+        ):
+            answer = customer_agent.handle_message("gemini-active", "هل يغني؟", source="telegram")
+        self.assertIn("لا توجد معلومات عن الغناء", answer)
+        self.assertIn("شو اسمك", answer)
+        self.assertEqual(customer_agent.session("gemini-active"), before)
+
+    def test_synthetic_deployment_qa_does_not_create_sessions_or_orders(self):
+        with (
+            mock.patch.object(customer_agent, "gemini_reply", return_value="لا توجد معلومات مؤكدة.") as reply,
+            mock.patch.object(customer_agent, "save_session") as save_session,
+            mock.patch.object(customer_agent, "create_order") as create_order,
+            mock.patch("builtins.print"),
+        ):
+            results = customer_agent.run_gemini_smoke_tests()
+        self.assertEqual(len(results), 3)
+        self.assertEqual(reply.call_count, 3)
+        self.assertTrue(all(customer_agent.safe_for_gemini(call.args[0]) for call in reply.call_args_list))
+        self.assertEqual(customer_agent.SESSIONS, {})
+        save_session.assert_not_called()
+        create_order.assert_not_called()
+
     def test_other_channels_do_not_call_gemini(self):
         with (
             mock.patch.object(customer_agent, "GEMINI_API_KEY", "test-key"),

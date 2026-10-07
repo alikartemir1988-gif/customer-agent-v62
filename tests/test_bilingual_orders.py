@@ -177,6 +177,32 @@ class BilingualOrderTests(unittest.TestCase):
                 self.assertFalse(agent.session(str(i))["buying"])
                 self.assertEqual(self.rows(), [])
 
+    def test_arabic_negation_and_purchase_questions_do_not_start_order(self):
+        for i, message in enumerate((
+            "ما بدي اشتري، بس بدي أعرف إذا بتشتغل على القمر؟",
+            "لا أريد أن أشتري الجهاز", "مو بدي أطلب الجهاز",
+            "كيف بدي أطلب بدون ما يتسجل شي؟", "هل بقدر أشتري؟",
+            "بدي أعرف كيف أطلب الجهاز", "ما بدي الجهاز",
+        )):
+            with self.subTest(message=message):
+                self.send(message, f"negation:{i}")
+                self.assertFalse(agent.session(f"negation:{i}")["buying"])
+                self.assertIsNone(agent.session(f"negation:{i}")["name"])
+                self.assertEqual(self.rows(), [])
+
+    def test_unusual_questions_cannot_become_names_or_edit_pending_order(self):
+        for source in ("telegram", "messenger", "botpress", "demo"):
+            with self.subTest(source=source):
+                chat = f"question:{source}"
+                self.send("بدي أطلب الجهاز", chat, source)
+                before = dict(agent.session(chat))
+                for question in ("هل يغني؟", "بتقدر تطير", "في آلة زمن"):
+                    answer = self.send(question, chat, source)
+                    self.assertIn("ما عندي إجابة مؤكدة", answer)
+                    self.assertIn("شو اسمك", answer)
+                    self.assertEqual(agent.session(chat), before)
+                self.assertEqual(self.rows(), [])
+
     def test_compound_information_does_not_mutate_order_in_either_language(self):
         questions = {
             "en": "How much are two devices, what colors are available, and delivery to Aleppo? Is there a warranty? Is delivery free?",

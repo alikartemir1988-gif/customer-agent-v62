@@ -104,6 +104,30 @@ class DemoAppTests(unittest.TestCase):
             hook(Mock())
         register.assert_called_once_with()
 
+    def test_gemini_deployment_qa_is_opt_in_and_skipped_in_demo(self):
+        hook = runpy.run_path(
+            str(Path(__file__).resolve().parents[1] / "gunicorn.conf.py")
+        )["post_worker_init"]
+        for enabled, is_demo in (("false", False), ("true", True), ("true", False)):
+            with (
+                self.subTest(enabled=enabled, is_demo=is_demo),
+                patch.dict(os.environ, {"GEMINI_RUN_SMOKE_TESTS": enabled, "LANGFUSE_RUN_SMOKE_TESTS": "false"}),
+                patch.dict(sys.modules),
+                patch.object(customer_agent, "BOT_TOKEN", ""),
+                patch("threading.Thread") as thread,
+            ):
+                if not is_demo:
+                    sys.modules.pop("demo_app", None)
+                else:
+                    sys.modules["demo_app"] = sys.modules[__name__]
+                hook(Mock())
+                if enabled == "true" and not is_demo:
+                    thread.assert_called_once()
+                    self.assertIs(thread.call_args.kwargs["target"], customer_agent.run_gemini_smoke_tests)
+                    thread.return_value.start.assert_called_once_with()
+                else:
+                    thread.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

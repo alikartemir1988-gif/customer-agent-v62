@@ -16,6 +16,7 @@ def post_worker_init(worker):
         WEBHOOK_SECRET,
         WEBHOOK_URL,
         register_webhook,
+        run_gemini_smoke_tests,
         run_langfuse_smoke_tests,
     )
 
@@ -25,6 +26,15 @@ def post_worker_init(worker):
         threading.Thread(
             target=run_langfuse_smoke_tests,
             name="langfuse-deploy-smoke",
+            daemon=True,
+        ).start()
+
+    if os.environ.get("GEMINI_RUN_SMOKE_TESTS", "").strip().lower() in (
+        "1", "true", "yes", "on"
+    ):
+        threading.Thread(
+            target=run_gemini_smoke_tests,
+            name="gemini-deploy-smoke",
             daemon=True,
         ).start()
 
