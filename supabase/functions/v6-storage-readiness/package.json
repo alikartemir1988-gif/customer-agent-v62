@@ -1,0 +1,9 @@
+{
+  "name": "v6-storage-readiness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "postgres": "3.4.7"
+  }
+}

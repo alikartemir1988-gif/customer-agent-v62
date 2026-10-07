@@ -56,7 +56,10 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
 DB_PATH = os.environ.get("DB_PATH", "customer_agent.db").strip()
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 APP_VERSION = "6.5.4"
-GIT_COMMIT = os.environ.get("RENDER_GIT_COMMIT", "").strip()
+GIT_COMMIT = (
+    os.environ.get("APP_GIT_COMMIT")
+    or os.environ.get("RENDER_GIT_COMMIT", "")
+).strip()
 
 API = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
 

@@ -41,7 +41,10 @@ def post_worker_init(worker):
             daemon=True,
         ).start()
 
-    if not (BOT_TOKEN and WEBHOOK_URL and WEBHOOK_SECRET):
+    register_on_start = os.environ.get(
+        "TELEGRAM_REGISTER_WEBHOOK_ON_START", "true"
+    ).strip().lower() not in {"0", "false", "no", "off"}
+    if not register_on_start or not (BOT_TOKEN and WEBHOOK_URL and WEBHOOK_SECRET):
         return
 
     try:
