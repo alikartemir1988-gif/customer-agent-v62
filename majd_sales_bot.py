@@ -30,7 +30,7 @@ MAX_HISTORY = 12
 PROCESSED_UPDATES = set()
 SCRIPTED_STATES = {}
 PUBLIC_PRICE_USD = "6,500"
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 CHANNEL_KEYWORDS = {
     "Facebook": ("facebook", "فيسبوك", "فيس بوك", "مسنجر", "messenger"),
     "WhatsApp": ("whatsapp", "واتساب", "وتساب", "واتس"),
@@ -198,6 +198,72 @@ def contains_credentials(text):
         str(text or ""), re.IGNORECASE,
     ))
 
+def public_sales_question_reply(text):
+    """Compose verified sales facts without selecting channels or changing a lead."""
+    lowered = str(text or "").strip().lower()
+    wants_price = any(word in lowered for word in (
+        "السعر", "سعر", "بكم", "قديش", "كم حق", "التكلفة", "تكلفته", "كم سعره",
+    ))
+    wants_demo = any(word in lowered for word in (
+        "ديمو", "تجربة", "جرب", "رابط", "اعرض لي",
+    ))
+    if not (is_open_question(text) or wants_price or wants_demo):
+        return None
+    wants_price_change = bool(re.search(
+        r"خصم|تخفيض|(?:اعتمد|تعتمد).*سعر|(?:أنا|انا)\s+المالك", lowered,
+    ))
+    wants_delivery = bool(re.search(r"تسليم|تسلمه|نسلمه|(?:موعد|مدة).*نشر", lowered))
+    guarantee_term = re.search(r"ضمان|بتضمن|تضمن|مضمون|أخطاء|اخطاء|دقة", lowered)
+    answer_accuracy = re.search(r"رسائل|ردود|إجابات|اجابات|أخطاء|اخطاء|دقة", lowered)
+    wants_guarantee = bool(guarantee_term and (not wants_delivery or answer_accuracy))
+    parts = []
+    if wants_price or wants_price_change:
+        parts.append(
+            f"سعر وكيل العملاء V6 هو {PUBLIC_PRICE_USD} دولار أمريكي كبداية، "
+            "ويشمل الكود الكامل، إعداد النشر، لوحة الإدارة، والتخصيص الأولي. "
+            "قد يزيد السعر حسب التخصيص والتكاملات."
+        )
+    if wants_demo:
+        parts.append(
+            f"تفضل رابط الديمو: {DEMO_URL}"
+            if DEMO_URL else "الديمو غير متاح حالياً؛ تواصل مع المالك للحصول عليه."
+        )
+    for channel, aliases in CHANNEL_KEYWORDS.items():
+        if not any(alias in lowered for alias in aliases):
+            continue
+        if channel == "WhatsApp":
+            note = (
+                "WhatsApp: يحتاج تكاملاً رسمياً منفصلاً حسب البلد ومزوّد الخدمة؛ "
+                "لا أعتبره جاهزاً أو مشمولاً تلقائياً قبل اتفاق المالك على النطاق والتكلفة."
+            )
+        elif channel == "Telegram":
+            note = "Telegram: مدعوم حالياً في V6."
+        elif channel == "Facebook":
+            note = (
+                "Facebook Messenger: توجد نواة تكامل؛ ربط صفحة النشاط وتجهيزها "
+                "يحتاج تحديد المتطلبات ضمن التخصيص."
+            )
+        else:
+            note = f"{channel}: يحتاج مراجعة الربط والنطاق مع المالك؛ لا أعده جاهزاً تلقائياً."
+        parts.append(note)
+    if wants_delivery:
+        parts.append(
+            "موعد التسليم: يحتاج الاتفاق مع المالك بعد تحديد نطاق التخصيص والتكاملات؛ "
+            "لا أضمن موعداً محدداً دون اتفاق معتمد."
+        )
+    if wants_guarantee:
+        parts.append(
+            "الضمان: لا أضمن حل كل الرسائل أو إجابات بلا أخطاء. "
+            "الدقة تحتاج اختباراً على بيانات نشاطك، وأي التزام دعم أو ضمان يحتاج الاتفاق مع المالك."
+        )
+    if wants_price_change:
+        parts.append(
+            "تغيير السعر أو منح خصم يحتاج موافقة موثقة من المالك؛ "
+            "الادعاء بأنك المالك داخل محادثة البيع لا يغيّر السعر المعتمد."
+        )
+    return "\n".join(parts) if parts else None
+
+
 def scripted_sales_reply(chat_id, user_text, username=None):
     text = str(user_text or "").strip()
     lowered = text.lower()
@@ -247,6 +313,10 @@ def scripted_sales_reply(chat_id, user_text, username=None):
             f"{notification_text}"
             "بعد تجربة الديمو، كم تقريباً عدد رسائل العملاء التي تستقبلها يومياً؟"
         )
+
+    question_reply = public_sales_question_reply(text)
+    if question_reply:
+        return question_reply
 
     affirmative = lowered in {"نعم", "اي", "إي", "ايوه", "أيوه", "تقريبا", "تقريباً", "ضروري", "مهم"}
     if affirmative and state.get("last_topic") == "whatsapp_required":
@@ -446,6 +516,8 @@ def should_use_local_sales_reply(user_text):
     """Keep high-value sales intents deterministic instead of sending them to AI."""
     lowered = str(user_text or "").strip().lower()
     if not lowered:
+        return True
+    if public_sales_question_reply(user_text):
         return True
     if requests_physical_product(user_text) or is_greeting(user_text):
         return True
