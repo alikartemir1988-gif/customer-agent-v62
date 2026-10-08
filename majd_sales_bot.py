@@ -30,7 +30,7 @@ MAX_HISTORY = 12
 PROCESSED_UPDATES = set()
 SCRIPTED_STATES = {}
 PUBLIC_PRICE_USD = "6,500"
-VERSION = "1.1.2"
+VERSION = "1.1.3"
 CHANNEL_KEYWORDS = {
     "Facebook": ("facebook", "فيسبوك", "فيس بوك", "مسنجر", "messenger"),
     "WhatsApp": ("whatsapp", "واتساب", "وتساب", "واتس"),
@@ -214,8 +214,8 @@ def public_sales_question_reply(text):
         r"خصم|تخفيض|(?:اعتمد|تعتمد).*سعر|(?:أنا|انا)\s+المالك", lowered,
     ))
     wants_delivery = bool(re.search(r"تسليم|تسلمه|نسلمه|(?:موعد|مدة).*نشر", lowered))
-    guarantee_term = re.search(r"ضمان|بتضمن|تضمن|مضمون|أخطاء|اخطاء|دقة", lowered)
-    answer_accuracy = re.search(r"رسائل|ردود|إجابات|اجابات|أخطاء|اخطاء|دقة", lowered)
+    guarantee_term = re.search(r"ضمان|بتضمن|تضمن|مضمون|أخطاء|اخطاء|دقة|اختلاق|هلوسة", lowered)
+    answer_accuracy = re.search(r"رسائل|ردود|إجابات|اجابات|أخطاء|اخطاء|دقة|اختلاق|هلوسة", lowered)
     wants_guarantee = bool(guarantee_term and (not wants_delivery or answer_accuracy))
     parts = []
     if wants_price or wants_price_change:
