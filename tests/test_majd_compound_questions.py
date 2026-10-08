@@ -80,6 +80,17 @@ class MajdCompoundQuestionTests(unittest.TestCase):
         self.assertIn("لا أضمن", answer)
         self.assertIn("اختبار", answer)
 
+    def test_hallucination_question_uses_approved_limits_without_provider_claims(self):
+        for question in (
+            "هل يستطيع وكيل V6 فهم سؤال غريب من عميل بدون اختلاق إجابة؟",
+            "هل يمنع V6 الهلوسة تماماً؟",
+        ):
+            with self.subTest(question=question):
+                answer = self.ask(question)
+                self.assertIn("لا أضمن", answer)
+                self.assertIn("اختبار", answer)
+                self.assertIn("أخطاء", answer)
+
     def test_delivery_and_reliability_are_distinct_parts(self):
         answer = self.ask("هل تضمن التسليم غداً وهل الردود كلها بلا أخطاء؟")
         self.assertIn("موعد التسليم", answer)
