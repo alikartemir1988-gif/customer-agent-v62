@@ -30,7 +30,7 @@ MAX_HISTORY = 12
 PROCESSED_UPDATES = set()
 SCRIPTED_STATES = {}
 PUBLIC_PRICE_USD = "6,500"
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 CHANNEL_KEYWORDS = {
     "Facebook": ("facebook", "فيسبوك", "فيس بوك", "مسنجر", "messenger"),
     "WhatsApp": ("whatsapp", "واتساب", "وتساب", "واتس"),
@@ -57,6 +57,7 @@ SYSTEM_PROMPT = """أنت مجد، مساعد مبيعات محترف وودود
 - السعر المعلن للعملاء الجدد هو 6,500 دولار أمريكي، وقد يزيد حسب التخصيص والتكامل والدعم.
 - لا تمنح خصماً ولا تكشف حدود التفاوض الداخلية؛ أي تفاوض أو سعر سابق يرجع إلى المالك.
 - لا تدّع وجود ميزة غير مذكورة. قل بوضوح إن أي قناة إضافية مثل WhatsApp تحتاج تكاملاً رسمياً منفصلاً.
+- لا تَعِد بمنع الأخطاء أو اختلاق الإجابات تماماً، ولا تدّع دقة مضمونة لكل الحالات. استخدام البيانات المعتمدة يقلل الأخطاء؛ المعلومة الناقصة تحتاج توضيحاً أو تأكيداً.
 - اسأل أسئلة قصيرة عن نشاط العميل، عدد الرسائل، القنوات، اللغات، والتكاملات المطلوبة.
 - عندما يظهر اهتمام جدي اطلب الاسم، الشركة، البلد، والبريد/الهاتف للتواصل الكتابي.
 - البيع كتابي؛ لا تعد بمكالمة أو اجتماع.
@@ -558,6 +559,21 @@ def contains_sensitive_customer_data(text):
     ))
 
 
+def unsupported_accuracy_claim(answer):
+    """Reject the observed absolute error-prevention sales claim, not its denial."""
+    normalized = re.sub(r"[\u064b-\u065f\u0670]", "", str(answer)).lower()
+    pattern = (
+        r"(?:يمنع\w*|تمنع\w*)\s+(?:تماما|تمام|كليا|نهائيا|جميع|كل)\s+"
+        r"(?:من\s+)?(?:اختلاق|الاختلاق|هلوسة|الهلوسة|اخطاء|الاخطاء|أخطاء|الأخطاء)|"
+        r"\b(?:prevent|eliminate|avoid)s?\s+(?:all|any)\s+(?:errors?|hallucinations?)\b"
+    )
+    for match in re.finditer(pattern, normalized):
+        prefix = normalized[:match.start()]
+        if not re.search(r"(?:\b(?:لا|لن|لم)\s+|\b(?:does|do|will|can)\s+not\s+)$", prefix):
+            return True
+    return False
+
+
 def gemini_sales_reply(chat_id, user_text):
     """Return a complete public sales answer, or None for a local fallback."""
     if not GEMINI_API_KEY or contains_sensitive_customer_data(user_text):
@@ -623,6 +639,8 @@ def gemini_sales_reply(chat_id, user_text):
             return None
         # Internal negotiation limits and invented discounts never reach Telegram.
         normalized = normalize_digits(answer).lower()
+        if unsupported_accuracy_claim(answer):
+            return None
         if re.search(r"(?<!\d)5[,\s]?000(?!\d)|خمسة\s+آلاف|five\s+thousand", normalized):
             return None
         prices = re.findall(

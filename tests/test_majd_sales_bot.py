@@ -260,6 +260,38 @@ class MajdSalesBotTests(unittest.TestCase):
         self.assertIsNone(majd_sales_bot.gemini_sales_reply("qa", "هل يفهم سؤالاً غريباً؟"))
 
     @patch("majd_sales_bot.requests.post")
+    def test_unproved_absolute_accuracy_claims_fall_back_without_changing_lead(self, post):
+        question = "هل يستطيع وكيل V6 فهم سؤال غريب من عميل بدون اختلاق إجابة؟"
+        majd_sales_bot.SCRIPTED_STATES["qa"] = {"last_topic": "channel", "lead": {"business_type": "متجر كتب"}}
+        before = copy.deepcopy(majd_sales_bot.SCRIPTED_STATES)
+        for answer in (
+            "يرتبط بقاعدة بيانات منتجاتك الحقيقية، مما يمنعه تماماً من اختلاق إجابات وهمية.",
+            "البرنامج يمنع جميع الأخطاء والهلوسة.",
+            "The software eliminates all hallucinations.",
+        ):
+            with self.subTest(answer=answer):
+                post.return_value.json.return_value = {
+                    "candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": answer}]}}]
+                }
+                self.assertIsNone(majd_sales_bot.gemini_sales_reply("qa", question))
+                reply = majd_sales_bot.ai_reply("qa", None, question)
+                self.assertNotEqual(reply, answer)
+                self.assertEqual(majd_sales_bot.SCRIPTED_STATES, before)
+
+    @patch("majd_sales_bot.requests.post")
+    def test_qualified_accuracy_answer_is_accepted(self, post):
+        question = "هل يستطيع وكيل V6 فهم سؤال غريب من عميل بدون اختلاق إجابة؟"
+        for answer in (
+            "يعتمد على البيانات المعتمدة، لكن لا يمنعه تماماً من اختلاق إجابات؛ لا توجد دقة مضمونة لكل الحالات.",
+            "The software does not eliminate all hallucinations; unknown facts need confirmation.",
+        ):
+            with self.subTest(answer=answer):
+                post.return_value.json.return_value = {
+                    "candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": answer}]}}]
+                }
+                self.assertEqual(majd_sales_bot.gemini_sales_reply("qa", question), answer)
+
+    @patch("majd_sales_bot.requests.post")
     def test_internal_limits_and_unapproved_prices_are_not_externalized(self, post):
         for answer in ("السعر 5,000 دولار", "خمسة آلاف دولار", "Price is $5000", "السعر 4,000 دولار", "السعر ٤٠٠٠ دولار", "Price USD 4000", "I'll call you", "تم تسجيل طلبك", "أمنحك خصم 50%", "I can give you a discount"):
             with self.subTest(answer=answer):
