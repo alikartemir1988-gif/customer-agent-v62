@@ -1,25 +1,30 @@
 # CI runner images
 
-The existing workflows use explicit `ubuntu-24.04` runners, including the
-portable container checks. The `ubuntu-latest` alias is intentionally avoided:
-GitHub will move it to Ubuntu 26.04 between October 19 and November 19, 2026.
+Python and Botpress tests in `tests.yml` use explicit `ubuntu-26.04` runners,
+with Python 3.12 and Node.js 22. The portable container workflow remains pinned
+to `ubuntu-24.04` until its Ubuntu 26.04 behavior is separately validated.
+No workflow relies on the moving `ubuntu-latest` alias.
 
-`ubuntu-26-compatibility.yml` tests the current checkout on `ubuntu-26.04` with
-Python 3.12 and Node.js 22. It compiles the Python application and tests,
-validates Gunicorn entry points, runs the full Python suite, and runs the
-Botpress typecheck and production dependency audit. Each job verifies the
-actual Ubuntu release before testing.
+Before this deliberate test-runner migration, Ubuntu 26.04 compatibility run
+[37690775114](https://github.com/alikartemir1988-gif/customer-agent-v62/actions/runs/37690775114)
+passed on Ubuntu 26.04.1 LTS with Python 3.12.14 and Node 22.23.3: compilation,
+three Gunicorn entry-point checks, all 132 Python tests, Botpress typecheck,
+and production dependency audit (0 vulnerabilities).
 
-The corresponding workflow on `majd-sales-bot` runs that branch's full Python
-suite, including the Majd sales and mocked live-verifier regressions, plus
-the Botpress checks. Both workflows have read-only repository permissions
-and do not use production credentials, deploy services, register webhooks,
-or invoke the live verification script against a service.
+`ubuntu-26-compatibility.yml` continues to test the current checkout on
+`ubuntu-26.04`. It verifies the actual Ubuntu release, compiles the application
+and tests, validates Gunicorn entry points, runs the full Python suite, and
+runs the Botpress typecheck and production audit. The corresponding workflow
+on `majd-sales-bot` includes that branch's Majd sales and mocked live-verifier
+regressions.
 
-After the compatibility runs pass, propose an explicit runner change for the
-Python and Botpress tests in a separate PR. Keep the portable container job
-and existing live-verification job on Ubuntu 24.04 until their Ubuntu 26.04
-behavior is separately validated. Rollback consists of restoring the tested
-jobs' `runs-on` values to `ubuntu-24.04`.
+Both compatibility workflows have read-only repository permissions and do
+not use production credentials, deploy services, register webhooks, or invoke
+the live verification script against a service. The existing live-verification
+job on `majd-sales-bot` remains pinned to Ubuntu 24.04.
+
+Rollback consists of restoring the migrated jobs' `runs-on` values to
+`ubuntu-24.04`. GitHub's automatic alias migration between October 19 and
+November 19, 2026 will not change the explicitly selected runners.
 
 Reference: [GitHub's Ubuntu 26 migration announcement](https://github.blog/changelog/2026-09-17-ubuntu-26-generally-available-and-latest-migration/).
