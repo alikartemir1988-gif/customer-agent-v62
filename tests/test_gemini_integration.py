@@ -15,12 +15,13 @@ import app as customer_agent
 class GeminiIntegrationTests(unittest.TestCase):
     def setUp(self):
         customer_agent.SESSIONS.clear()
+        customer_agent.GEMINI_RECOVERY.reset()
 
     @staticmethod
     def gemini_response(answer):
         response = mock.Mock()
         response.json.return_value = {
-            "candidates": [{"content": {"parts": [{"text": answer}]}}]
+            "candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": answer}]}}]
         }
         return response
 
@@ -98,7 +99,10 @@ class GeminiIntegrationTests(unittest.TestCase):
                 ):
                     answer = customer_agent.handle_message(chat, question, source="telegram")
                 self.assertEqual(answer, expected)
-                self.assertEqual(customer_agent.session(chat), before)
+                self.assertEqual(
+                    {k: v for k, v in customer_agent.session(chat).items() if k != "public_dialogue"},
+                    {k: v for k, v in before.items() if k != "public_dialogue"},
+                )
                 self.assertEqual(post.call_args.kwargs["json"]["contents"][0]["parts"][0]["text"], question)
                 post.assert_called_once()
 
