@@ -13,19 +13,21 @@ A ready-to-deploy Arabic conversational sales agent for Telegram that answers pr
 - Cosmetics and fashion sellers
 - Businesses receiving repetitive Telegram inquiries
 
-## Recommended pricing
+## Public pricing
 
-### Business Deployment — USD 5,000 minimum
+### Business Deployment — USD 6,500 starting price
+
+This is the public starting price for new customers, matching Majd's advertised offer. The final price may increase with customization, integrations, additional channels or support requirements. The owner confirms the scope and final price in writing.
 
 Includes:
 
-- Customer Agent software deployment
+- Full Customer Agent source code and deployment setup
 - Merchant branding and Arabic copy customization
 - Initial product catalog configuration
 - Delivery-area configuration
 - Telegram bot integration
 - Order capture workflow
-- Protected order-management API
+- Protected administration dashboard and order-management API
 - Deployment verification
 - Basic operator documentation
 - 14 days of post-launch defect support
@@ -38,12 +40,6 @@ Not included unless separately agreed:
 - WhatsApp Business Platform fees/integration
 - Major custom feature development
 - Ongoing managed support
-
-## Suggested higher-value packages
-
-- Business: $5,000 — standard deployment
-- Pro: $7,500 — deployment plus merchant-specific workflow customization and reporting
-- Enterprise: $12,000+ — integrations, database migration, monitoring and custom workflows
 
 ## Sales pitch
 
@@ -67,6 +63,6 @@ Before quoting a buyer, confirm:
 6. Who will manage confirmed orders?
 7. What hosting/compliance requirements do they have?
 
-## Commercial rule
+## Agreement and handover
 
-Do not quote or accept a software sale below USD 5,000 without the owner's explicit approval. Scope, delivery date, support obligations, payment method and software/IP rights must be written down before accepting payment.
+Majd presents the public offer and collects the buyer's requirements. The owner handles the final agreement and payment. Scope, delivery date, support obligations, payment method and software/IP rights must be written down before accepting payment. Communication, requirements review and handover arrangements are handled in writing.
