@@ -1,0 +1,78 @@
+name: Ubuntu 26.04 compatibility
+
+on:
+  push:
+    branches:
+      - majd-sales-bot
+      - 'ci/ubuntu*-majd-*'
+  pull_request:
+    branches:
+      - majd-sales-bot
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-ubuntu-26:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: ''
+      TELEGRAM_BOT_TOKEN: ''
+      MAJD_TELEGRAM_BOT_TOKEN: ''
+      MAJD_WEBHOOK_URL: ''
+      MAJD_RUN_GEMINI_SMOKE_TESTS: 'false'
+      GEMINI_API_KEY: ''
+      LANGFUSE_PUBLIC_KEY: ''
+      LANGFUSE_SECRET_KEY: ''
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Verify runner image and Python version
+        run: |
+          . /etc/os-release
+          test "$VERSION_ID" = '26.04'
+          printf 'Runner image: %s\n' "$PRETTY_NAME"
+          python --version
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Compile Python application and tests
+        run: python -m compileall -q app.py dashboard.py majd_sales_bot.py observability.py gunicorn.conf.py scripts tests
+      - name: Validate production entry points
+        run: |
+          python -m gunicorn --check-config app:app
+          python -m gunicorn --check-config dashboard:dashboard_app
+          python -m gunicorn --check-config majd_sales_bot:app
+      - name: Run Python and Majd regressions
+        run: python -m unittest discover -s tests -v
+
+  botpress-ubuntu-26:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: botpress/package-lock.json
+      - name: Verify runner image and Node.js version
+        run: |
+          . /etc/os-release
+          test "$VERSION_ID" = '26.04'
+          printf 'Runner image: %s\n' "$PRETTY_NAME"
+          node --version
+          npm --version
+      - name: Install Botpress dependencies
+        working-directory: botpress
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Type-check Botpress adapter and evals
+        working-directory: botpress
+        run: npm run typecheck
+      - name: Audit Botpress production dependencies
+        working-directory: botpress
+        run: npm audit --omit=dev --audit-level=high
