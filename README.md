@@ -1,4 +1,4 @@
-# Customer Agent V6.5.4
+# Customer Agent V6.5.5
 
 A Telegram and Facebook Messenger sales assistant that answers product, pricing,
 and delivery questions and records confirmed customer orders.
@@ -16,6 +16,13 @@ and delivery questions and records confirmed customer orders.
   refer to the previous pending order.
 - **6.5.4:** The public demo starts, chats, and resets without database access;
   demo conversations stay in worker memory and production storage remains durable.
+- **6.5.5:** Revoke receives selected-product context and up to three short public
+  dialogue pairs for follow-up questions, with private data filtered again before
+  each Gemini request. Rephrasing requests do not become order details. Multi-part
+  questions keep deterministic catalog answers and acknowledge unanswered clauses.
+  Generated replies reject unapproved prices, discounts, sensitive-data requests
+  and absolute accuracy claims. A bounded outage backoff returns local replies
+  immediately instead of repeatedly waiting for a failing or rate-limited provider.
 
 ## Current behavior
 
@@ -24,6 +31,12 @@ and delivery questions and records confirmed customer orders.
   optional color, quantity, name, phone, city, review, confirmation, edits and cancellation.
 - Optionally uses Gemini for open Telegram questions. Catalog answers and order
   confirmation stay in the local sales flow; contact details are not sent to Gemini.
+- Uses only public product context and approved FAQ entries for AI explanations.
+  Recent short, non-identifying questions and answers persist with the existing
+  conversation; they are bounded and are not collected during an active order.
+  AI text remains advisory: it cannot grant account access, change prices, confirm
+  orders, grant discounts, or make a staff call. Response guards reduce observed
+  failure modes; they do not establish perfect accuracy.
 - Collects product, optional colour, quantity, name, phone, and city.
 - Shows a complete order review before saving.
 - Saves only after the customer writes `تأكيد`, `نعم`, `confirm`, `yes`, or another supported confirmation.
