@@ -199,7 +199,7 @@ class BilingualOrderTests(unittest.TestCase):
                 for question in ("هل يغني؟", "بتقدر تطير", "في آلة زمن"):
                     answer = self.send(question, chat, source)
                     self.assertIn("ما عندي إجابة مؤكدة", answer)
-                    self.assertIn("شو اسمك", answer)
+                    self.assertNotIn("شو اسمك", answer)
                     self.assertEqual(agent.session(chat), before)
                 self.assertEqual(self.rows(), [])
 
@@ -215,7 +215,7 @@ class BilingualOrderTests(unittest.TestCase):
                 self.assertEqual(agent.session(chat), before)
                 self.assertEqual(self.rows(), [])
 
-    def test_question_at_delivery_step_explains_followup_without_changing_order(self):
+    def test_question_at_delivery_step_does_not_repeat_order_prompt_or_change_order(self):
         self.ai.return_value = "لا، ما عنا هيك جهاز."
         for source in ("telegram", "messenger", "botpress", "demo"):
             with self.subTest(source=source):
@@ -226,8 +226,8 @@ class BilingualOrderTests(unittest.TestCase):
                 before = dict(agent.session(chat))
                 self.ai.reset_mock()
                 reply = self.send("عندكم جهاز بيحول الهواء لذهب", chat, source)
-                self.assertIn("إذا بدك تكمّل طلبك السابق", reply)
-                self.assertIn("المدينة للتوصيل", reply)
+                self.assertNotIn("إذا بدك تكمّل طلبك السابق", reply)
+                self.assertNotIn("المدينة للتوصيل", reply)
                 self.assertEqual(self.ai.call_count, 1 if source == "telegram" else 0)
                 self.assertEqual(agent.session(chat), before)
                 self.assertEqual(self.rows(), [])
@@ -292,7 +292,8 @@ class BilingualOrderTests(unittest.TestCase):
         self.send("I want 2 black devices")
         before = dict(agent.session("customer"))
         reply = self.send("Where is my parcel?")
-        self.assertIn("your name", reply)
+        self.assertIn("no approved answer", reply)
+        self.assertNotIn("your name", reply)
         self.assertEqual(agent.session("customer"), before)
         self.assertIsNone(agent.session("customer")["name"])
 

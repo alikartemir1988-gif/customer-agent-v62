@@ -242,7 +242,7 @@ class GeminiIntegrationTests(unittest.TestCase):
         ):
             answer = customer_agent.handle_message("gemini-active", "هل يغني؟", source="telegram")
         self.assertIn("لا توجد معلومات عن الغناء", answer)
-        self.assertIn("شو اسمك", answer)
+        self.assertNotIn("شو اسمك", answer)
         self.assertEqual(customer_agent.session("gemini-active"), before)
 
     def test_synthetic_deployment_qa_does_not_create_sessions_or_orders(self):
@@ -253,8 +253,8 @@ class GeminiIntegrationTests(unittest.TestCase):
             mock.patch("builtins.print"),
         ):
             results = customer_agent.run_gemini_smoke_tests()
-        self.assertEqual(len(results), 3)
-        self.assertEqual(reply.call_count, 3)
+            self.assertEqual(len(results), 5)
+        self.assertEqual(reply.call_count, 5)
         self.assertTrue(all(customer_agent.safe_for_gemini(call.args[0]) for call in reply.call_args_list))
         self.assertEqual(customer_agent.SESSIONS, {})
         save_session.assert_not_called()

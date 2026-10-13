@@ -1,4 +1,4 @@
-# Customer Agent V6.5.5
+# Customer Agent V6.5.6
 
 A Telegram and Facebook Messenger sales assistant that answers product, pricing,
 and delivery questions and records confirmed customer orders.
@@ -23,6 +23,14 @@ and delivery questions and records confirmed customer orders.
   Generated replies reject unapproved prices, discounts, sensitive-data requests
   and absolute accuracy claims. A bounded outage backoff returns local replies
   immediately instead of repeatedly waiting for a failing or rate-limited provider.
+- **6.5.6:** Telegram `/start` and `/reset` clear the previous draft and public
+  context without deleting saved orders. Questions about restarting receive help,
+  not an accidental reset; refusing to continue an order cancels its draft.
+  Open questions no longer append an unrelated pending-order reminder. Requests
+  to explain the current order step stay local. Revoke answers identity questions
+  directly and queues explicit owner-contact requests for staff follow-up without
+  promising a direct connection. General questions can receive relevant answers;
+  unsolicited purchase invitations and raw emphasis markers are removed.
 
 ## Current behavior
 
@@ -153,7 +161,7 @@ not automatically translated by a paid model.
 - `GEMINI_MODEL`: Defaults to `gemini-3.5-flash-lite`. Set it only to a model
   available to the project's free tier if billing must remain disabled.
 - `GEMINI_RUN_SMOKE_TESTS`: Defaults to `false`. Temporarily enable for deployment
-  QA: three fixed synthetic questions call Gemini and log their replies without
+  QA: five fixed synthetic questions call Gemini and log their replies without
   creating customer sessions or orders. Disable after checking the results.
 - `LANGFUSE_CAPTURE_CONTENT`: Defaults to `false`; enable only for synthetic or consented conversations.
 - `META_GRAPH_VERSION`: Graph API version used for replies (default: `v23.0`).
