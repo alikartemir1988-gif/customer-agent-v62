@@ -113,7 +113,7 @@ class ResponseQualityTests(unittest.TestCase):
         self.assertEqual(agent.session("customer"), before)
         self.assertIsNone(agent.session("customer")["name"])
         self.assertIn("شو اسمك", answer)
-        self.post.assert_called_once()
+        self.post.assert_not_called()
 
     def test_multi_part_question_keeps_price_and_answers_the_open_part(self):
         self.post.return_value = self.response("لا توجد بيانات عن ملاءمته للطلاب.")
