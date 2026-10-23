@@ -75,8 +75,10 @@ def demo_health():
 
 @demo_app.post("/api/message")
 def demo_message():
-    payload = request.get_json(silent=True) or {}
-    message = str(payload.get("message") or "").strip()
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or not isinstance(payload.get("message"), str):
+        return jsonify({"ok": False, "error": "invalid text message"}), 400
+    message = payload["message"].strip()
 
     if not message:
         return jsonify({"ok": False, "error": "اكتب رسالة أولاً."}), 400
