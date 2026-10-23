@@ -56,7 +56,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
 DB_PATH = os.environ.get("DB_PATH", "customer_agent.db").strip()
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
-APP_VERSION = "6.5.6"
+APP_VERSION = "6.5.7"
 GIT_COMMIT = (
     os.environ.get("APP_GIT_COMMIT")
     or os.environ.get("RENDER_GIT_COMMIT", "")
@@ -3764,51 +3764,42 @@ def telegram_webhook():
             }
         ), 403
 
-    update = (
-        request.get_json(
-            silent=True
-        )
-        or {}
-    )
+    update = request.get_json(silent=True)
+    if not isinstance(update, dict):
+        return jsonify({"ok": False, "error": "invalid JSON body"}), 400
 
-    update_id = update.get(
-        "update_id"
-    )
+    update_id = update.get("update_id")
+    if type(update_id) is not int or update_id < 0:
+        return jsonify({"ok": False, "error": "invalid update_id"}), 400
 
-    if not claim_update(update_id):
-
-        return jsonify(
-            {
-                "ok": True,
-                "duplicate": True,
-            }
-        )
-
-    message = update.get(
-        "message",
-        {},
-    )
+    message = update.get("message")
+    if message is None:
+        # Telegram also sends non-message updates, which need no conversation work.
+        return jsonify({"ok": True})
+    if not isinstance(message, dict):
+        return jsonify({"ok": False, "error": "invalid message"}), 400
 
     text = message.get("text")
-
-    chat_id = (
-        message.get(
-            "chat",
-            {},
-        ).get("id")
-    )
-
+    if text is None:
+        # Photos, stickers and other non-text messages are intentionally ignored.
+        return jsonify({"ok": True})
+    chat = message.get("chat")
     if (
-        not text
-        or chat_id is None
+        not isinstance(text, str)
+        or not text.strip()
+        or len(text) > 4096
+        or not isinstance(chat, dict)
+        or type(chat.get("id")) is not int
+        or chat["id"] == 0
     ):
-        return jsonify(
-            {
-                "ok": True,
-            }
-        )
+        return jsonify({"ok": False, "error": "invalid text message"}), 400
+    chat_id = chat["id"]
 
+    claimed = False
     try:
+        claimed = claim_update(update_id)
+        if not claimed:
+            return jsonify({"ok": True, "duplicate": True})
 
         if text == "/products":
 
@@ -3831,7 +3822,11 @@ def telegram_webhook():
         )
 
     except Exception as exc:
-        release_update(update_id)
+        if claimed:
+            try:
+                release_update(update_id)
+            except Exception as release_exc:
+                log_external_failure("Telegram update claim cleanup failed", release_exc)
         log_external_failure("Telegram update failed", exc)
 
         return jsonify(
