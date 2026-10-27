@@ -1,9 +1,15 @@
-# Customer Agent V6.5.6
+# Customer Agent V6.5.7
 
 A Telegram and Facebook Messenger sales assistant that answers product, pricing,
 and delivery questions and records confirmed customer orders.
 
 ## Recent fixes
+
+- **6.5.7:** Telegram validates update identifiers and text-message structure before
+  touching storage or conversation state. Malformed requests return a controlled
+  error without consuming the update identifier; non-text updates remain ignored.
+  Storage failures return a retryable response even when claim cleanup also fails.
+  The public demo rejects non-text JSON values instead of treating them as replies.
 
 - **6.5.1:** Questions and purchase refusals cannot become customer names or other
   order details. Gemini validation rejects incomplete/blocked replies and false

@@ -30,10 +30,10 @@ class ConversationControlTests(unittest.TestCase):
         self.ai = manager.start()
         self.addCleanup(manager.stop)
 
-    def ask(self, text, chat="customer", source="telegram"):
+    def ask(self, text, chat=123456, source="telegram"):
         return agent.handle_message(chat, text, source=source)
 
-    def pending_city(self, chat="customer", source="telegram"):
+    def pending_city(self, chat=123456, source="telegram"):
         for message in ("بدي أطلب الجهاز", "اسمي أحمد خالد", "0933123456"):
             self.ask(message, chat, source)
         self.assertEqual(agent.session(chat)["order_step"], "city")
@@ -42,7 +42,7 @@ class ConversationControlTests(unittest.TestCase):
         with patch.object(agent, "telegram_api") as telegram, patch.object(agent, "WEBHOOK_SECRET", "test-secret"):
             response = agent.app.test_client().post(
                 "/telegram", json={"update_id": update_id, "message": {
-                    "text": text, "chat": {"id": "customer"},
+                    "text": text, "chat": {"id": 123456},
                 }}, headers={"X-Telegram-Bot-Api-Secret-Token": "test-secret"},
             )
         self.assertEqual(response.status_code, 200)
@@ -51,13 +51,13 @@ class ConversationControlTests(unittest.TestCase):
 
     def test_start_from_telegram_clears_old_draft_and_persisted_context(self):
         self.pending_city()
-        agent.session("customer")["public_dialogue"] = [{"question": "كم السعر؟", "answer": "30$"}]
-        agent.save_session("customer", agent.session("customer"))
+        agent.session(123456)["public_dialogue"] = [{"question": "كم السعر؟", "answer": "30$"}]
+        agent.save_session(123456, agent.session(123456))
         agent.SESSIONS.clear()
         answer = self.webhook("/start")
         self.assertIn("ريفوك", answer)
         agent.SESSIONS.clear()
-        state = agent.session("customer")
+        state = agent.session(123456)
         self.assertFalse(state["buying"])
         self.assertIsNone(state["name"])
         self.assertIsNone(state["phone"])
@@ -71,44 +71,44 @@ class ConversationControlTests(unittest.TestCase):
         self.assertEqual(agent.list_orders()[1], 1)
         self.webhook("/start")
         self.assertEqual(agent.list_orders()[1], 1)
-        self.assertFalse(agent.session("customer")["done"])
-        self.assertIsNone(agent.session("customer")["order_id"])
+        self.assertFalse(agent.session(123456)["done"])
+        self.assertIsNone(agent.session(123456)["order_id"])
 
     def test_start_and_reset_keep_arabic_in_a_new_telegram_chat(self):
         for number, command in enumerate(("/start", "/reset", "/start@RevokeBot")):
             with self.subTest(command=command):
                 answer = self.webhook(command, update_id=71100 + number)
                 self.assertIn("ريفوك", answer)
-                self.assertEqual(agent.session("customer")["language"], "ar")
+                self.assertEqual(agent.session(123456)["language"], "ar")
 
     def test_start_closes_only_current_support_ticket(self):
         self.ask("بدي أتواصل مع المالك")
-        current_ticket = agent.session("customer")["support_ticket_id"]
+        current_ticket = agent.session(123456)["support_ticket_id"]
         self.ask("موظف", chat="other")
         other_ticket = agent.session("other")["support_ticket_id"]
         self.webhook("/start")
-        self.assertIsNone(agent.session("customer")["support_ticket_id"])
+        self.assertIsNone(agent.session(123456)["support_ticket_id"])
         self.assertEqual(agent.support_store.ticket(current_ticket)["status"], "closed")
         self.assertEqual(agent.support_store.ticket(other_ticket)["status"], "open")
 
     def test_asking_how_to_restart_or_cancel_explains_without_resetting(self):
         self.pending_city()
-        before = copy.deepcopy(agent.session("customer"))
+        before = copy.deepcopy(agent.session(123456))
         for question in ("كيف أبدأ من جديد", "كيف ألغي الطلب؟", "How do I start over?"):
             with self.subTest(question=question):
                 answer = self.ask(question)
                 self.assertIn("/start" if "cancel" not in question and "ألغي" not in question else "cancel", answer)
-                self.assertEqual(agent.session("customer"), before)
+                self.assertEqual(agent.session(123456), before)
                 self.assertNotIn("لغيت المحادثة", answer)
         self.ai.assert_not_called()
 
     def test_negated_restart_is_not_a_reset_command(self):
         self.pending_city()
-        before = copy.deepcopy(agent.session("customer"))
+        before = copy.deepcopy(agent.session(123456))
         for message in ("ما بدي أبدأ من جديد", "لا تبدأ من جديد", "I don't want to start over", "ليش قلت ابدأ من جديد؟"):
             with self.subTest(message=message):
                 self.ask(message)
-                self.assertEqual(agent.session("customer"), before)
+                self.assertEqual(agent.session(123456), before)
         self.assertEqual(agent.list_orders()[1], 0)
 
     def test_declining_to_continue_clears_pending_order_in_all_channels(self):
@@ -129,36 +129,36 @@ class ConversationControlTests(unittest.TestCase):
 
     def test_declining_discount_or_explanation_preserves_order(self):
         self.pending_city()
-        before = copy.deepcopy(agent.session("customer"))
+        before = copy.deepcopy(agent.session(123456))
         for message in ("ما بدي خصم", "ما بدي نكمل الشرح عن الطلب", "I don't want a discount"):
             with self.subTest(message=message):
                 self.ask(message)
-                self.assertEqual(agent.session("customer"), before)
+                self.assertEqual(agent.session(123456), before)
 
     def test_negated_cancel_during_name_step_does_not_become_a_name(self):
         self.ask("بدي أطلب الجهاز")
-        before = copy.deepcopy(agent.session("customer"))
+        before = copy.deepcopy(agent.session(123456))
         for message in ("لا تلغي الطلب", "ما بدي ألغي الطلب", "don't reset", "ما بدي أبدأ من جديد"):
             with self.subTest(message=message):
                 self.ask(message)
-                self.assertEqual(agent.session("customer"), before)
-                self.assertIsNone(agent.session("customer")["name"])
+                self.assertEqual(agent.session(123456), before)
+                self.assertIsNone(agent.session(123456)["name"])
         self.ai.assert_not_called()
 
     def test_unrelated_question_does_not_append_pending_delivery_reminder(self):
         self.pending_city()
-        before = copy.deepcopy(agent.session("customer"))
+        before = copy.deepcopy(agent.session(123456))
         answer = self.ask("عندكم جهاز بيحوّل الهواء لذهب؟")
         self.assertEqual(answer, "جواب عن السؤال نفسه.")
-        self.assertEqual(agent.session("customer"), before)
+        self.assertEqual(agent.session(123456), before)
 
     def test_order_step_explanation_is_local_and_cannot_become_customer_name(self):
         self.ask("بدي أطلب الجهاز")
-        before = copy.deepcopy(agent.session("customer"))
+        before = copy.deepcopy(agent.session(123456))
         answer = self.ask("ما فهمت شو لازم أعمل؟")
         self.assertIn("شو اسمك", answer)
         self.assertIn("مثال", answer)
-        self.assertEqual(agent.session("customer"), before)
+        self.assertEqual(agent.session(123456), before)
         self.ai.assert_not_called()
 
     def test_identity_and_unknown_owner_are_answered_without_catalog_promotion(self):
@@ -176,8 +176,8 @@ class ConversationControlTests(unittest.TestCase):
         self.assertEqual(len(tickets), 1)
         self.assertIn("متابعة", answer)
         self.assertIn("اتصال مباشر", answer)
-        self.assertFalse(agent.session("customer")["buying"])
-        self.assertEqual(agent.session("customer")["support_ticket_id"], tickets[0]["id"])
+        self.assertFalse(agent.session(123456)["buying"])
+        self.assertEqual(agent.session(123456)["support_ticket_id"], tickets[0]["id"])
         self.ai.assert_not_called()
 
     def test_approved_public_owner_answer_takes_precedence_over_unknown_owner(self):
